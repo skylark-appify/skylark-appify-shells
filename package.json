@@ -1,0 +1,36 @@
+{
+  "name": "skylark-ui-shells",
+  "description": "The skylark shells widget",
+  "version": "0.9.0",
+  "keywords": [
+    "skylark",
+    "ui",
+    "shells"
+  ],
+  "homepage": "https://github.com/skylarkui/skylark-ui-shells/",
+  "author": "Hudaokeji, Inc.",
+  "scripts": {
+    "build": "sbundle build ."
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/skylarkui/skylark-ui-shells.git"
+  },
+  "bugs": {
+    "url": "https://github.com/skylarkui/skylark-bs-shells/issues"
+  },
+  "license": "MIT",
+  "dependencies": {
+    "skylark-bootbox4": "git+https://github.com/skylark-integration/skylark-bootbox4.git#master",
+    "skylark-bootstrap3": "git+https://github.com/skylark-integration/skylark-bootstrap3.git#master",
+    "skylark-langx": "git+https://github.com/skylarklangx/skylark-langx.git#master",
+    "skylark-nprogress": "git+https://github.com/skylark-integration/skylark-nprogress.git#master",
+    "skylark-tinycon": "git+https://github.com/skylark-integration/skylark-tinycon.git#master",
+    "skylark-ui-swt": "git+https://github.com/skylarkui/skylark-ui-swt.git#master",
+    "skylark-utils-dom": "git+https://github.com/skylarkutils/skylark-utils-dom.git#master",
+    "skylark-visibility": "git+https://github.com/skylark-integration/skylark-visibility.git#master"
+  },
+  "engines": {
+    "node": ">=0.10.1"
+  }
+}
