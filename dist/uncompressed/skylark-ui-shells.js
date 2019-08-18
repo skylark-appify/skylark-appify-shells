@@ -106,42 +106,44 @@ define('skylark-ui-shells/Shell',[
 	"./shells"
 ],function(langx, css, scripter, finder,$,Widget,nprogress,bootbox,Visibility, Tinycon,shells){
 	function createAlert(params,template) {
-		(params.template || template)(params).then(function(translatedHTML){
-				var alert = $('#' + params.alert_id);
-				if (alert.length) {
-					return updateAlert(alert, params);
-				}
-				alert = $(translatedHTML);
-				alert.fadeIn(200);
+	    params.template('alert', params, function (alertTpl) {
+	      params.translate(alertTpl, function (translatedHTML) {				
+	        var alert = $('#' + params.alert_id);
+					if (alert.length) {
+						return updateAlert(alert, params);
+					}
+					alert = $(translatedHTML);
+					alert.fadeIn(200);
 
-				
-				params.container.prepend(alert);
-				//components.get('toaster/tray').prepend(alert);
+					
+					params.container.prepend(alert);
+					//components.get('toaster/tray').prepend(alert);
 
-				if (typeof params.closefn === 'function') {
-					alert.find('button').on('click', function () {
-						params.closefn();
-						fadeOut(alert);
-						return false;
-					});
-				}
-
-				if (params.timeout) {
-					startTimeout(alert, params.timeout);
-				}
-
-				if (typeof params.clickfn === 'function') {
-					alert
-						.addClass('pointer')
-						.on('click', function (e) {
-							if (!$(e.target).is('.close')) {
-								params.clickfn();
-							}
+					if (typeof params.closefn === 'function') {
+						alert.find('button').on('click', function () {
+							params.closefn();
 							fadeOut(alert);
+							return false;
 						});
-				}
+					}
 
-		});
+					if (params.timeout) {
+						startTimeout(alert, params.timeout);
+					}
+
+					if (typeof params.clickfn === 'function') {
+						alert
+							.addClass('pointer')
+							.on('click', function (e) {
+								if (!$(e.target).is('.close')) {
+									params.clickfn();
+								}
+								fadeOut(alert);
+							});
+					}
+
+			  });
+	   });
 
 		//Benchpress.parse('alert', params, function (alertTpl) {
 		//	translator.translate(alertTpl, function (translatedHTML) {
@@ -266,11 +268,16 @@ define('skylark-ui-shells/Shell',[
 			params.message = params.message ? params.message.trim() : '';
 			params.type = params.type || 'info';
 
+
 			var alert = $('#' + params.alert_id);
+
+      		params.translate = params.translate || this.option("i18n.translate");
 			if (alert.length) {
 				updateAlert(alert, params);
 			} else {
-				createAlert(params,this.option("template"));
+        		params.template = params.template || this.option("template");
+        		params.container  = params.container || this.option("alerts.container");
+				createAlert(params);
 			}
 		},
 
