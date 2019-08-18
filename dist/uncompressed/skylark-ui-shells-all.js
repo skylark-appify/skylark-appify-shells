@@ -13651,7 +13651,7 @@ define('skylark-ui-shells/Shell',[
 	"./shells"
 ],function(langx, css, scripter, finder,$,Widget,nprogress,bootbox,Visibility, Tinycon,shells){
 	function createAlert(params,template) {
-	    params.template('alert', params, function (alertTpl) {
+	    params.parseTemplate('alert', params, function (alertTpl) {
 	      params.translate(alertTpl, function (translatedHTML) {				
 	        var alert = $('#' + params.alert_id);
 					if (alert.length) {
@@ -13776,7 +13776,9 @@ define('skylark-ui-shells/Shell',[
 					error :  '[[global:alert.error]]'
 				},
 			},
-			template  : null,    // template function
+			templator  : {
+				parse  : null,    // template function
+			},
 			skins : {
 
 			}
@@ -13791,7 +13793,9 @@ define('skylark-ui-shells/Shell',[
 	        	titles: [],
 	      	};
 
-	     	 var self = this;
+	     	var self = this;
+
+	     	self.isFocused = true;
 
 	      	Visibility.change(function (event, state) {
 	        	if (state === 'visible') {
@@ -13820,7 +13824,7 @@ define('skylark-ui-shells/Shell',[
 			if (alert.length) {
 				updateAlert(alert, params);
 			} else {
-        		params.template = params.template || this.option("template");
+        		params.parseTemplate = params.parseTemplate || this.option("templator.parse");
         		params.container  = params.container || this.option("alerts.container");
 				createAlert(params);
 			}
