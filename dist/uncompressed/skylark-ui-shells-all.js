@@ -4660,6 +4660,8 @@ define('skylark-utils-dom/noder',[
             } else {
                 node.appendChild(html);
             }
+
+
         }
     }
 
@@ -6509,8 +6511,49 @@ define('skylark-utils-dom/scripter',[
         scriptElementsById = {},
         count = 0;
 
+    var rscriptType = ( /^$|^module$|\/(?:java|ecma)script/i );
+
     function scripter() {
         return scripter;
+    }
+
+
+    var preservedScriptAttributes = {
+        type: true,
+        src: true,
+        nonce: true,
+        noModule: true
+    };
+
+    function evaluate(code,node, doc ) {
+        doc = doc || document;
+
+        var i, val,
+            script = doc.createElement("script");
+
+        script.text = code;
+        if ( node ) {
+            for ( i in preservedScriptAttributes ) {
+
+                // Support: Firefox 64+, Edge 18+
+                // Some browsers don't support the "nonce" property on scripts.
+                // On the other hand, just using `getAttribute` is not enough as
+                // the `nonce` attribute is reset to an empty string whenever it
+                // becomes browsing-context connected.
+                // See https://github.com/whatwg/html/issues/2369
+                // See https://html.spec.whatwg.org/#nonce-attributes
+                // The `node.getAttribute` check was added for the sake of
+                // `jQuery.globalEval` so that it can fake a nonce-containing node
+                // via an object.
+                val = node[ i ] || node.getAttribute && node.getAttribute( i );
+                if ( val ) {
+                    script.setAttribute( i, val );
+                }
+            }
+        }
+        doc.head.appendChild( script ).parentNode.removeChild( script );
+
+        return this;
     }
 
     langx.mixin(scripter, {
@@ -6588,6 +6631,30 @@ define('skylark-utils-dom/scripter',[
                 delete scriptElementsById[id];
                 delete scriptsByUrl[url];
             }
+        },
+
+        evaluate : evaluate,
+
+        html : function(node,value) {
+
+            var result = noder.html(node,value);
+
+            if (value !== undefined) {
+                var scripts = node.querySelectorAll('script');
+
+                for (var i =0; i<scripts.length; i++) {
+                    var node1 = scripts[i];
+                    if (rscriptType.test( node1.type || "" ) ) {
+                      evaluate(node1.textContent,node1);
+                    }
+                }       
+                return this;         
+            } else {
+                return result;
+            }
+
+
+
         }
     });
 
@@ -6993,8 +7060,8 @@ define('skylark-utils-dom/datax',[
           }
 
           // If set returns undefined, fall back to normal setting
-          if ( !hooks || !( "set" in hooks ) || hooks.set( elm, val, "value" ) === undefined ) {
-            elm.value = val;
+          if ( !hooks || !( "set" in hooks ) || hooks.set( elm, value, "value" ) === undefined ) {
+            elm.value = value;
           }
         }      
     }
@@ -9336,8 +9403,9 @@ define('skylark-utils-dom/query',[
     "./finder",
     "./geom",
     "./styler",
-    "./fx"
-], function(dom, langx, noder, datax, eventer, finder, geom, styler, fx) {
+    "./fx",
+    "./scripter"
+], function(dom, langx, noder, datax, eventer, finder, geom, styler, fx,scripter) {
     var some = Array.prototype.some,
         push = Array.prototype.push,
         every = Array.prototype.every,
@@ -9861,7 +9929,7 @@ define('skylark-utils-dom/query',[
 
             siblings: wrapper_selector(finder.siblings, finder),
 
-            html: wrapper_value(noder.html, noder, noder.html),
+            html: wrapper_value(scripter.html, scripter, scripter.html),
 
             text: wrapper_value(datax.text, datax, datax.text),
 
