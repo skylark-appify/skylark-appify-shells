@@ -1,6 +1,6 @@
 define([
 	"skylark-langx/skylark"
 ],function(skylark){
-	return skylark.attach("ui.shells",{});
+	return skylark.attach("widgets.shells",{});
 
 });

@@ -4,7 +4,7 @@ define([
 	"skylark-utils-dom/scripter",
 	"skylark-utils-dom/finder",
 	"skylark-utils-dom/query",
-	"skylark-ui-swt/Widget",
+	"skylark-widgets-swt/Widget",
 	"skylark-nprogress",
 	"skylark-bootbox4",
   "skylark-visibility",
