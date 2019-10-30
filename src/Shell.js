@@ -1,9 +1,9 @@
 define([
 	"skylark-langx/langx",
-	"skylark-utils-dom/css",
-	"skylark-utils-dom/scripter",
-	"skylark-utils-dom/finder",
-	"skylark-utils-dom/query",
+	"skylark-domx-css",
+	"skylark-domx-scripter",
+	"skylark-domx-finder",
+	"skylark-domx-query",
 	"skylark-widgets-swt/Widget",
 	"skylark-nprogress",
 	"skylark-bootbox4",
