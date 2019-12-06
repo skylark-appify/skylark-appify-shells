@@ -101,7 +101,7 @@ define('skylark-widgets-shells/Shell',[
 	"skylark-widgets-swt/Widget",
 	"skylark-nprogress",
 	"skylark-bootbox4",
-  "skylark-visibility",
+    "skylark-visibility",
   "skylark-tinycon",
 	"./shells"
 ],function(langx, css, scripter, finder,$,Widget,nprogress,bootbox,Visibility, Tinycon,shells){
@@ -445,7 +445,6 @@ define('skylark-widgets-shells/Shell',[
 define('skylark-widgets-shells/main',[
 	"./shells",
 	"./Shell",
-	"skylark-langx",
 	"skylark-bootstrap3",
 	"skylark-widgets-swt",
 	"skylark-visibility"
