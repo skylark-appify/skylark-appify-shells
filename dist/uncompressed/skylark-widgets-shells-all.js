@@ -7108,9 +7108,7 @@ define('skylark-domx-data/data',[
                 }
                 return this;
             } else {
-                if (elm.hasAttribute && elm.hasAttribute(name)) {
-                    return elm.getAttribute(name);
-                }
+                return elm.getAttribute(name);
             }
         } else {
             elm.setAttribute(name, value);
@@ -14172,13 +14170,14 @@ define('skylark-widgets-shells/Shell',[
 					params.container.prepend(alert);
 					//components.get('toaster/tray').prepend(alert);
 
-					if (typeof params.closefn === 'function') {
-						alert.find('button').on('click', function () {
+					alert.find('button').on('click', function () {
+						if (typeof params.closefn === 'function') {
 							params.closefn();
-							fadeOut(alert);
-							return false;
-						});
-					}
+						}
+						fadeOut(alert);
+						return false;
+					});
+
 
 					if (params.timeout) {
 						startTimeout(alert, params.timeout);
