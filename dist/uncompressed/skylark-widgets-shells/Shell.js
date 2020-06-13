@@ -4,11 +4,11 @@ define([
 	"skylark-domx-scripter",
 	"skylark-domx-finder",
 	"skylark-domx-query",
-	"skylark-widgets-swt/Widget",
+	"skylark-widgets-base/Widget",
 	"skylark-nprogress",
 	"skylark-bootbox4",
     "skylark-visibility",
-  "skylark-tinycon",
+    "skylark-tinycon",
 	"./shells"
 ],function(langx, css, scripter, finder,$,Widget,nprogress,bootbox,Visibility, Tinycon,shells){
 	function createAlert(params,template) {

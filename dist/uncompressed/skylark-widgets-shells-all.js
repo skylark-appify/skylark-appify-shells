@@ -691,7 +691,7 @@ define('skylark-langx-objects/objects',[
         return keys;
     }
 
-    function each(obj, callback) {
+    function each(obj, callback,isForEach) {
         var length, key, i, undef, value;
 
         if (obj) {
@@ -702,7 +702,7 @@ define('skylark-langx-objects/objects',[
                 for (key in obj) {
                     if (obj.hasOwnProperty(key)) {
                         value = obj[key];
-                        if (callback.call(value, key, value) === false) {
+                        if ((isForEach ? callback.call(value, value, key) : callback.call(value, key, value) ) === false) {
                             break;
                         }
                     }
@@ -711,7 +711,7 @@ define('skylark-langx-objects/objects',[
                 // Loop array items
                 for (i = 0; i < length; i++) {
                     value = obj[i];
-                    if (callback.call(value, i, value) === false) {
+                    if ((isForEach ? callback.call(value, value, i) : callback.call(value, i, value) )=== false) {
                         break;
                     }
                 }
@@ -830,13 +830,15 @@ define('skylark-langx-objects/objects',[
             if (safe && target[key] !== undefined) {
                 continue;
             }
-            if (deep && (isPlainObject(source[key]) || isArray(source[key]))) {
-                if (isPlainObject(source[key]) && !isPlainObject(target[key])) {
+            // if (deep && (isPlainObject(source[key]) || isArray(source[key]))) {
+            //    if (isPlainObject(source[key]) && !isPlainObject(target[key])) {
+            if (deep && isPlainObject(source[key])) {
+                if (!isPlainObject(target[key])) {
                     target[key] = {};
                 }
-                if (isArray(source[key]) && !isArray(target[key])) {
-                    target[key] = [];
-                }
+                //if (isArray(source[key]) && !isArray(target[key])) {
+                //    target[key] = [];
+                //}
                 _mixin(target[key], source[key], deep, safe);
             } else if (source[key] !== undefined) {
                 target[key] = source[key]
@@ -2676,7 +2678,12 @@ define('skylark-langx/Deferred',[
 ],function(Deferred){
     return Deferred;
 });
-define('skylark-langx-emitter/Event',[
+define('skylark-langx-events/events',[
+	"skylark-langx-ns"
+],function(skylark){
+	return skylark.attach("langx.events",{});
+});
+define('skylark-langx-events/Event',[
   "skylark-langx-objects",
   "skylark-langx-funcs",
   "skylark-langx-klass",
@@ -2731,14 +2738,159 @@ define('skylark-langx-emitter/Event',[
     return Event;
     
 });
-define('skylark-langx-emitter/Emitter',[
-  "skylark-langx-ns/ns",
+define('skylark-langx-events/Listener',[
   "skylark-langx-types",
   "skylark-langx-objects",
   "skylark-langx-arrays",
   "skylark-langx-klass",
+  "./events",
   "./Event"
-],function(skylark,types,objects,arrays,klass,Event){
+],function(types,objects,arrays,klass,events,Event){
+    var slice = Array.prototype.slice,
+        compact = arrays.compact,
+        isDefined = types.isDefined,
+        isPlainObject = types.isPlainObject,
+        isFunction = types.isFunction,
+        isBoolean = types.isBoolean,
+        isString = types.isString,
+        isEmptyObject = types.isEmptyObject,
+        mixin = objects.mixin,
+        safeMixin = objects.safeMixin;
+
+
+    var Listener = klass({
+
+        listenTo: function(obj, event, callback, /*used internally*/ one) {
+            if (!obj) {
+                return this;
+            }
+
+            if (isBoolean(callback)) {
+                one = callback;
+                callback = null;
+            }
+
+            if (types.isPlainObject(event)){
+                //listenTo(obj,callbacks,one)
+                var callbacks = event;
+                for (var name in callbacks) {
+                    this.listeningTo(obj,name,callbacks[name],one);
+                }
+                return this;
+            }
+
+            if (!callback) {
+                callback = "handleEvent";
+            }
+            
+            // Bind callbacks on obj,
+            if (isString(callback)) {
+                callback = this[callback];
+            }
+
+            if (one) {
+                obj.one(event, callback, this);
+            } else {
+                obj.on(event, callback, this);
+            }
+
+            //keep track of them on listening.
+            var listeningTo = this._listeningTo || (this._listeningTo = []),
+                listening;
+
+            for (var i = 0; i < listeningTo.length; i++) {
+                if (listeningTo[i].obj == obj) {
+                    listening = listeningTo[i];
+                    break;
+                }
+            }
+            if (!listening) {
+                listeningTo.push(
+                    listening = {
+                        obj: obj,
+                        events: {}
+                    }
+                );
+            }
+            var listeningEvents = listening.events,
+                listeningEvent = listeningEvents[event] = listeningEvents[event] || [];
+            if (listeningEvent.indexOf(callback) == -1) {
+                listeningEvent.push(callback);
+            }
+
+            return this;
+        },
+
+        listenToOnce: function(obj, event, callback) {
+            return this.listenTo(obj, event, callback, 1);
+        },
+
+        unlistenTo: function(obj, event, callback) {
+            var listeningTo = this._listeningTo;
+            if (!listeningTo) {
+                return this;
+            }
+
+            if (isString(callback)) {
+                callback = this[callback];
+            }
+
+            for (var i = 0; i < listeningTo.length; i++) {
+                var listening = listeningTo[i];
+
+                if (obj && obj != listening.obj) {
+                    continue;
+                }
+
+                var listeningEvents = listening.events;
+                for (var eventName in listeningEvents) {
+                    if (event && event != eventName) {
+                        continue;
+                    }
+
+                    var listeningEvent = listeningEvents[eventName];
+
+                    for (var j = 0; j < listeningEvent.length; j++) {
+                        if (!callback || callback == listeningEvent[i]) {
+                            listening.obj.off(eventName, listeningEvent[i], this);
+                            listeningEvent[i] = null;
+                        }
+                    }
+
+                    listeningEvent = listeningEvents[eventName] = compact(listeningEvent);
+
+                    if (isEmptyObject(listeningEvent)) {
+                        listeningEvents[eventName] = null;
+                    }
+
+                }
+
+                if (isEmptyObject(listeningEvents)) {
+                    listeningTo[i] = null;
+                }
+            }
+
+            listeningTo = this._listeningTo = compact(listeningTo);
+            if (isEmptyObject(listeningTo)) {
+                this._listeningTo = null;
+            }
+
+            return this;
+        }
+    });
+
+    return events.Listener = Listener;
+
+});
+define('skylark-langx-events/Emitter',[
+  "skylark-langx-types",
+  "skylark-langx-objects",
+  "skylark-langx-arrays",
+  "skylark-langx-klass",
+  "./events",
+  "./Event",
+  "./Listener"
+],function(types,objects,arrays,klass,events,Event,Listener){
     var slice = Array.prototype.slice,
         compact = arrays.compact,
         isDefined = types.isDefined,
@@ -2757,7 +2909,7 @@ define('skylark-langx-emitter/Emitter',[
         };
     }
 
-    var Emitter = klass({
+    var Emitter = Listener.inherit({
         on: function(events, selector, data, callback, ctx, /*used internally*/ one) {
             var self = this,
                 _hub = this._hub || (this._hub = {});
@@ -2781,6 +2933,12 @@ define('skylark-langx-emitter/Emitter',[
                 ctx = callback;
                 callback = data;
                 data = null;
+            }
+
+            if (!callback ) {
+                throw new Error("No callback function");
+            } else if (!isFunction(callback)) {
+                throw new Error("The callback  is not afunction");
             }
 
             if (isString(events)) {
@@ -2878,53 +3036,6 @@ define('skylark-langx-emitter/Emitter',[
             return evtArr.length > 0;
         },
 
-        listenTo: function(obj, event, callback, /*used internally*/ one) {
-            if (!obj) {
-                return this;
-            }
-
-            // Bind callbacks on obj,
-            if (isString(callback)) {
-                callback = this[callback];
-            }
-
-            if (one) {
-                obj.one(event, callback, this);
-            } else {
-                obj.on(event, callback, this);
-            }
-
-            //keep track of them on listening.
-            var listeningTo = this._listeningTo || (this._listeningTo = []),
-                listening;
-
-            for (var i = 0; i < listeningTo.length; i++) {
-                if (listeningTo[i].obj == obj) {
-                    listening = listeningTo[i];
-                    break;
-                }
-            }
-            if (!listening) {
-                listeningTo.push(
-                    listening = {
-                        obj: obj,
-                        events: {}
-                    }
-                );
-            }
-            var listeningEvents = listening.events,
-                listeningEvent = listeningEvents[event] = listeningEvents[event] || [];
-            if (listeningEvent.indexOf(callback) == -1) {
-                listeningEvent.push(callback);
-            }
-
-            return this;
-        },
-
-        listenToOnce: function(obj, event, callback) {
-            return this.listenTo(obj, event, callback, 1);
-        },
-
         off: function(events, callback) {
             var _hub = this._hub || (this._hub = {});
             if (isString(events)) {
@@ -2967,93 +3078,52 @@ define('skylark-langx-emitter/Emitter',[
 
             return this;
         },
-        unlistenTo: function(obj, event, callback) {
-            var listeningTo = this._listeningTo;
-            if (!listeningTo) {
-                return this;
-            }
-            for (var i = 0; i < listeningTo.length; i++) {
-                var listening = listeningTo[i];
-
-                if (obj && obj != listening.obj) {
-                    continue;
-                }
-
-                var listeningEvents = listening.events;
-                for (var eventName in listeningEvents) {
-                    if (event && event != eventName) {
-                        continue;
-                    }
-
-                    var listeningEvent = listeningEvents[eventName];
-
-                    for (var j = 0; j < listeningEvent.length; j++) {
-                        if (!callback || callback == listeningEvent[i]) {
-                            listening.obj.off(eventName, listeningEvent[i], this);
-                            listeningEvent[i] = null;
-                        }
-                    }
-
-                    listeningEvent = listeningEvents[eventName] = compact(listeningEvent);
-
-                    if (isEmptyObject(listeningEvent)) {
-                        listeningEvents[eventName] = null;
-                    }
-
-                }
-
-                if (isEmptyObject(listeningEvents)) {
-                    listeningTo[i] = null;
-                }
-            }
-
-            listeningTo = this._listeningTo = compact(listeningTo);
-            if (isEmptyObject(listeningTo)) {
-                this._listeningTo = null;
-            }
-
-            return this;
-        },
-
         trigger  : function() {
             return this.emit.apply(this,arguments);
         }
     });
 
-    Emitter.createEvent = function (type,props) {
+
+    return events.Emitter = Emitter;
+
+});
+define('skylark-langx/Emitter',[
+    "skylark-langx-events/Emitter"
+],function(Emitter){
+    return Emitter;
+});
+define('skylark-langx/Evented',[
+    "./Emitter"
+],function(Emitter){
+    return Emitter;
+});
+define('skylark-langx-events/createEvent',[
+	"./events",
+	"./Event"
+],function(events,Event){
+    function createEvent(type,props) {
         //var e = new CustomEvent(type,props);
         //return safeMixin(e, props);
         return new Event(type,props);
     };
 
-    Emitter.Event = Event;
-
-    return skylark.attach("langx.Emitter",Emitter);
-
+    return events.createEvent = createEvent;	
 });
-define('skylark-langx-emitter/Evented',[
-  "skylark-langx-ns/ns",
-	"./Emitter"
-],function(skylark,Emitter){
-	return skylark.attach("langx.Evented",Emitter);
-});
-define('skylark-langx-emitter/main',[
+define('skylark-langx-events/main',[
+	"./events",
+	"./Event",
+	"./Listener",
 	"./Emitter",
-	"./Evented"
-],function(Emitter){
-	return Emitter;
+	"./createEvent"
+],function(events){
+	return events;
 });
-define('skylark-langx-emitter', ['skylark-langx-emitter/main'], function (main) { return main; });
+define('skylark-langx-events', ['skylark-langx-events/main'], function (main) { return main; });
 
-define('skylark-langx/Emitter',[
-    "skylark-langx-emitter"
-],function(Evented){
-    return Evented;
-});
-define('skylark-langx/Evented',[
-    "skylark-langx-emitter"
-],function(Evented){
-    return Evented;
+define('skylark-langx/events',[
+	"skylark-langx-events"
+],function(events){
+	return events;
 });
 define('skylark-langx/funcs',[
     "skylark-langx-funcs"
@@ -3152,6 +3222,209 @@ define('skylark-langx/hoster',[
 	"skylark-langx-hoster"
 ],function(hoster){
 	return hoster;
+});
+define('skylark-langx-maths/maths',[
+    "skylark-langx-ns",
+    "skylark-langx-types"
+],function(skylark,types){
+
+
+	var _lut = [];
+
+	for ( var i = 0; i < 256; i ++ ) {
+
+		_lut[ i ] = ( i < 16 ? '0' : '' ) + ( i ).toString( 16 );
+
+	}
+
+	var maths = {
+
+		DEG2RAD: Math.PI / 180,
+		RAD2DEG: 180 / Math.PI,
+
+
+
+		clamp: function ( value, min, max ) {
+
+			return Math.max( min, Math.min( max, value ) );
+
+		},
+
+		// compute euclidian modulo of m % n
+		// https://en.wikipedia.org/wiki/Modulo_operation
+
+		euclideanModulo: function ( n, m ) {
+
+			return ( ( n % m ) + m ) % m;
+
+		},
+
+		// Linear mapping from range <a1, a2> to range <b1, b2>
+
+		mapLinear: function ( x, a1, a2, b1, b2 ) {
+
+			return b1 + ( x - a1 ) * ( b2 - b1 ) / ( a2 - a1 );
+
+		},
+
+		// https://en.wikipedia.org/wiki/Linear_interpolation
+
+		lerp: function ( x, y, t ) {
+
+			return ( 1 - t ) * x + t * y;
+
+		},
+
+		// http://en.wikipedia.org/wiki/Smoothstep
+
+		smoothstep: function ( x, min, max ) {
+
+			if ( x <= min ) return 0;
+			if ( x >= max ) return 1;
+
+			x = ( x - min ) / ( max - min );
+
+			return x * x * ( 3 - 2 * x );
+
+		},
+
+		smootherstep: function ( x, min, max ) {
+
+			if ( x <= min ) return 0;
+			if ( x >= max ) return 1;
+
+			x = ( x - min ) / ( max - min );
+
+			return x * x * x * ( x * ( x * 6 - 15 ) + 10 );
+
+		},
+
+		// Random integer from <low, high> interval
+
+		randInt: function ( low, high ) {
+
+			return low + Math.floor( Math.random() * ( high - low + 1 ) );
+
+		},
+
+		// Random float from <low, high> interval
+
+		randFloat: function ( low, high ) {
+
+			return low + Math.random() * ( high - low );
+
+		},
+
+		// Random float from <-range/2, range/2> interval
+
+		randFloatSpread: function ( range ) {
+
+			return range * ( 0.5 - Math.random() );
+
+		},
+
+		degToRad: function ( degrees ) {
+
+			return degrees * MathUtils.DEG2RAD;
+
+		},
+
+		radToDeg: function ( radians ) {
+
+			return radians * MathUtils.RAD2DEG;
+
+		},
+
+		isPowerOfTwo: function ( value ) {
+
+			return ( value & ( value - 1 ) ) === 0 && value !== 0;
+
+		},
+
+		ceilPowerOfTwo: function ( value ) {
+
+			return Math.pow( 2, Math.ceil( Math.log( value ) / Math.LN2 ) );
+
+		},
+
+		floorPowerOfTwo: function ( value ) {
+
+			return Math.pow( 2, Math.floor( Math.log( value ) / Math.LN2 ) );
+
+		},
+
+		setQuaternionFromProperEuler: function ( q, a, b, c, order ) {
+
+			// Intrinsic Proper Euler Angles - see https://en.wikipedia.org/wiki/Euler_angles
+
+			// rotations are applied to the axes in the order specified by 'order'
+			// rotation by angle 'a' is applied first, then by angle 'b', then by angle 'c'
+			// angles are in radians
+
+			var cos = Math.cos;
+			var sin = Math.sin;
+
+			var c2 = cos( b / 2 );
+			var s2 = sin( b / 2 );
+
+			var c13 = cos( ( a + c ) / 2 );
+			var s13 = sin( ( a + c ) / 2 );
+
+			var c1_3 = cos( ( a - c ) / 2 );
+			var s1_3 = sin( ( a - c ) / 2 );
+
+			var c3_1 = cos( ( c - a ) / 2 );
+			var s3_1 = sin( ( c - a ) / 2 );
+
+			if ( order === 'XYX' ) {
+
+				q.set( c2 * s13, s2 * c1_3, s2 * s1_3, c2 * c13 );
+
+			} else if ( order === 'YZY' ) {
+
+				q.set( s2 * s1_3, c2 * s13, s2 * c1_3, c2 * c13 );
+
+			} else if ( order === 'ZXZ' ) {
+
+				q.set( s2 * c1_3, s2 * s1_3, c2 * s13, c2 * c13 );
+
+			} else if ( order === 'XZX' ) {
+
+				q.set( c2 * s13, s2 * s3_1, s2 * c3_1, c2 * c13 );
+
+			} else if ( order === 'YXY' ) {
+
+				q.set( s2 * c3_1, c2 * s13, s2 * s3_1, c2 * c13 );
+
+			} else if ( order === 'ZYZ' ) {
+
+				q.set( s2 * s3_1, s2 * c3_1, c2 * s13, c2 * c13 );
+
+			} else {
+
+				console.warn( 'THREE.MathUtils: .setQuaternionFromProperEuler() encountered an unknown order.' );
+
+			}
+
+		}
+
+	};
+
+
+
+	return  skylark.attach("langx.maths",maths);
+});
+define('skylark-langx-maths/main',[
+	"./maths"
+],function(maths){
+	return maths;
+});
+define('skylark-langx-maths', ['skylark-langx-maths/main'], function (main) { return main; });
+
+define('skylark-langx/maths',[
+    "skylark-langx-maths"
+],function(maths){
+    return maths;
 });
 define('skylark-langx/numbers',[
 	"skylark-langx-numbers"
@@ -3357,8 +3630,13 @@ define('skylark-langx-strings/strings',[
         return document.getElementById(id).innerHTML;
     };
 
+
+    function ltrim(str) {
+        return str.replace(/^\s+/, '');
+    }
+    
     function rtrim(str) {
-        return str.replace(/\s+$/g, '');
+        return str.replace(/\s+$/, '');
     }
 
     // Slugify a string
@@ -3424,6 +3702,8 @@ define('skylark-langx-strings/strings',[
         escapeHTML : escapeHTML,
 
         generateUUID : generateUUID,
+
+        ltrim : ltrim,
 
         lowerFirst: function(str) {
             return str.charAt(0).toLowerCase() + str.slice(1);
@@ -3827,6 +4107,16 @@ define('skylark-langx/Stateful',[
 
 	return Stateful;
 });
+define('skylark-langx-emitter/Emitter',[
+    "skylark-langx-events/Emitter"
+],function(Emitter){
+    return Emitter;
+});
+define('skylark-langx-emitter/Evented',[
+	"./Emitter"
+],function(Emitter){
+	return Emitter;
+});
 define('skylark-langx-topic/topic',[
 	"skylark-langx-ns",
 	"skylark-langx-emitter/Evented"
@@ -3885,16 +4175,39 @@ define('skylark-langx/langx',[
     "./Deferred",
     "./Emitter",
     "./Evented",
+    "./events",
     "./funcs",
     "./hoster",
     "./klass",
+    "./maths",
     "./numbers",
     "./objects",
     "./Stateful",
     "./strings",
     "./topic",
     "./types"
-], function(skylark,arrays,ArrayStore,aspect,async,datetimes,Deferred,Emitter,Evented,funcs,hoster,klass,numbers,objects,Stateful,strings,topic,types) {
+], function(
+    skylark,
+    arrays,
+    ArrayStore,
+    aspect,
+    async,
+    datetimes,
+    Deferred,
+    Emitter,
+    Evented,
+    events,
+    funcs,
+    hoster,
+    klass,
+    maths,
+    numbers,
+    objects,
+    Stateful,
+    strings,
+    topic,
+    types
+) {
     "use strict";
     var toString = {}.toString,
         concat = Array.prototype.concat,
@@ -9038,12 +9351,12 @@ define('skylark-domx-styler/styler',[
         var self = this;
         name.split(/\s+/g).forEach(function(klass) {
             if (when === undefined) {
-                when = !self.hasClass(elm, klass);
+                when = !hasClass(elm, klass);
             }
             if (when) {
-                self.addClass(elm, klass);
+                addClass(elm, klass);
             } else {
-                self.removeClass(elm, klass)
+                removeClass(elm, klass)
             }
         });
 
@@ -9229,9 +9542,11 @@ define('skylark-io-diskfs/diskfs',[
     "skylark-langx/Deferred",
     "skylark-domx-styler",
     "skylark-domx-eventer",
-    "./files",
-    "skylark-io-diskfs/webentry"
-],function(arrays,Deferred, styler, eventer, files, webentry){  /*
+    "skylark-domx-velm",
+    "skylark-domx-query",   
+    "skylark-io-diskfs/webentry",   
+    "./files"
+],function(arrays,Deferred, styler, eventer, velm, $, webentry, files){  /*
      * Make the specified element to could accept HTML5 file drag and drop.
      * @param {HTMLElement} elm
      * @param {PlainObject} params
@@ -9290,14 +9605,24 @@ define('skylark-io-diskfs/diskfs',[
 
         return this;
     }
+    files.dropzone = dropzone;
 
-     return files.dropzone = dropzone;
+    velm.delegate([
+        "dropzone"
+    ],files);
+
+
+    $.fn.dropzone = $.wraps.wrapper_every_act(files.dropzone, files);
+
+    return dropzone;
 });
 define('skylark-domx-files/pastezone',[
     "skylark-langx/objects",
     "skylark-domx-eventer",
+    "skylark-domx-velm",
+    "skylark-domx-query",   
     "./files"
-],function(objects, eventer, files){
+],function(objects, eventer,velm,$, files){
     function pastezone(elm, params) {
         params = params || {};
         var hoverClass = params.hoverClass || "pastezone",
@@ -9323,7 +9648,15 @@ define('skylark-domx-files/pastezone',[
         return this;
     }
 
-    return files.pastezone = pastezone;
+    files.pastezone = pastezone;
+
+    velm.delegate([
+        "pastezone"
+    ],files);
+
+    $.fn.pastezone = $.wraps.wrapper_every_act(files.pastezone, files);
+
+    return pastezone;
 
 });
 
@@ -9390,9 +9723,11 @@ define('skylark-io-diskfs/select',[
 define('skylark-domx-files/picker',[
     "skylark-langx/objects",
     "skylark-domx-eventer",
-    "./files",
-    "skylark-io-diskfs/select"
-],function(objects, eventer, files, select){
+    "skylark-domx-velm",
+    "skylark-domx-query",   
+    "skylark-io-diskfs/select",
+    "./files"
+],function(objects, eventer, velm, $, select, files){
     /*
      * Make the specified element to pop-up the file selection dialog box when clicked , and read the contents the files selected from client file system by user.
      * @param {HTMLElement} elm
@@ -9406,651 +9741,28 @@ define('skylark-domx-files/picker',[
         return this;
     }
 
-    return files.picker = picker;
+    files.picker = picker;
+
+    velm.delegate([
+        "picker"
+    ],files);
+
+    $.fn.picker = $.wraps.wrapper_every_act(files.picker, files);
+
+    return picker;
 
 });
 
 
 
-define('skylark-net-http/http',[
-  "skylark-langx-ns/ns",
-],function(skylark){
-	return skylark.attach("net.http",{});
+define('skylark-langx-emitter/main',[
+	"./Emitter",
+	"./Evented"
+],function(Emitter){
+	return Emitter;
 });
-define('skylark-net-http/Xhr',[
-  "skylark-langx-ns/ns",
-  "skylark-langx-types",
-  "skylark-langx-objects",
-  "skylark-langx-arrays",
-  "skylark-langx-funcs",
-  "skylark-langx-async/Deferred",
-  "skylark-langx-emitter/Evented",
-  "./http"
-],function(skylark,types,objects,arrays,funcs,Deferred,Evented,http){
+define('skylark-langx-emitter', ['skylark-langx-emitter/main'], function (main) { return main; });
 
-    var each = objects.each,
-        mixin = objects.mixin,
-        noop = funcs.noop,
-        isArray = types.isArray,
-        isFunction = types.isFunction,
-        isPlainObject = types.isPlainObject,
-        type = types.type;
- 
-     var getAbsoluteUrl = (function() {
-        var a;
-
-        return function(url) {
-            if (!a) a = document.createElement('a');
-            a.href = url;
-
-            return a.href;
-        };
-    })();
-   
-    var Xhr = (function(){
-        var jsonpID = 0,
-            key,
-            name,
-            rscript = /<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi,
-            scriptTypeRE = /^(?:text|application)\/javascript/i,
-            xmlTypeRE = /^(?:text|application)\/xml/i,
-            jsonType = 'application/json',
-            htmlType = 'text/html',
-            blankRE = /^\s*$/;
-
-        var XhrDefaultOptions = {
-            async: true,
-
-            // Default type of request
-            type: 'GET',
-            // Callback that is executed before request
-            beforeSend: noop,
-            // Callback that is executed if the request succeeds
-            success: noop,
-            // Callback that is executed the the server drops error
-            error: noop,
-            // Callback that is executed on request complete (both: error and success)
-            complete: noop,
-            // The context for the callbacks
-            context: null,
-            // Whether to trigger "global" Ajax events
-            global: true,
-
-            // MIME types mapping
-            // IIS returns Javascript as "application/x-javascript"
-            accepts: {
-                script: 'text/javascript, application/javascript, application/x-javascript',
-                json: 'application/json',
-                xml: 'application/xml, text/xml',
-                html: 'text/html',
-                text: 'text/plain'
-            },
-            // Whether the request is to another domain
-            crossDomain: false,
-            // Default timeout
-            timeout: 0,
-            // Whether data should be serialized to string
-            processData: false,
-            // Whether the browser should be allowed to cache GET responses
-            cache: true,
-
-            traditional : false,
-            
-            xhrFields : {
-                withCredentials : false
-            }
-        };
-
-        function mimeToDataType(mime) {
-            if (mime) {
-                mime = mime.split(';', 2)[0];
-            }
-            if (mime) {
-                if (mime == htmlType) {
-                    return "html";
-                } else if (mime == jsonType) {
-                    return "json";
-                } else if (scriptTypeRE.test(mime)) {
-                    return "script";
-                } else if (xmlTypeRE.test(mime)) {
-                    return "xml";
-                }
-            }
-            return "text";
-        }
-
-        function appendQuery(url, query) {
-            if (query == '') return url
-            return (url + '&' + query).replace(/[&?]{1,2}/, '?')
-        }
-
-        // serialize payload and append it to the URL for GET requests
-        function serializeData(options) {
-            options.data = options.data || options.query;
-            if (options.processData && options.data && type(options.data) != "string") {
-                options.data = param(options.data, options.traditional);
-            }
-            if (options.data && (!options.type || options.type.toUpperCase() == 'GET')) {
-                if (type(options.data) != "string") {
-                    options.data = param(options.data, options.traditional);
-                }
-                options.url = appendQuery(options.url, options.data);
-                options.data = undefined;
-            }
-        }
-        
-        function serialize(params, obj, traditional, scope) {
-            var t, array = isArray(obj),
-                hash = isPlainObject(obj)
-            each(obj, function(key, value) {
-                t =type(value);
-                if (scope) key = traditional ? scope :
-                    scope + '[' + (hash || t == 'object' || t == 'array' ? key : '') + ']'
-                // handle data in serializeArray() format
-                if (!scope && array) params.add(value.name, value.value)
-                // recurse into nested objects
-                else if (t == "array" || (!traditional && t == "object"))
-                    serialize(params, value, traditional, key)
-                else params.add(key, value)
-            })
-        }
-
-        var param = function(obj, traditional) {
-            var params = []
-            params.add = function(key, value) {
-                if (isFunction(value)) {
-                  value = value();
-                }
-                if (value == null) {
-                  value = "";
-                }
-                this.push(encodeURIComponent(key) + '=' + encodeURIComponent(value));
-            };
-            serialize(params, obj, traditional)
-            return params.join('&').replace(/%20/g, '+')
-        };
-
-        var Xhr = Evented.inherit({
-            klassName : "Xhr",
-
-            _request  : function(args) {
-                var _ = this._,
-                    self = this,
-                    options = mixin({},XhrDefaultOptions,_.options,args),
-                    xhr = _.xhr = new XMLHttpRequest();
-
-                serializeData(options)
-
-                if (options.beforeSend) {
-                    options.beforeSend.call(this, xhr, options);
-                }                
-
-                var dataType = options.dataType || options.handleAs,
-                    mime = options.mimeType || options.accepts[dataType],
-                    headers = options.headers,
-                    xhrFields = options.xhrFields,
-                    isFormData = options.data && options.data instanceof FormData,
-                    basicAuthorizationToken = options.basicAuthorizationToken,
-                    type = options.type,
-                    url = options.url,
-                    async = options.async,
-                    user = options.user , 
-                    password = options.password,
-                    deferred = new Deferred(),
-                    contentType = options.contentType || (isFormData ? false : 'application/x-www-form-urlencoded');
-
-                if (xhrFields) {
-                    for (name in xhrFields) {
-                        xhr[name] = xhrFields[name];
-                    }
-                }
-
-                if (mime && mime.indexOf(',') > -1) {
-                    mime = mime.split(',', 2)[0];
-                }
-                if (mime && xhr.overrideMimeType) {
-                    xhr.overrideMimeType(mime);
-                }
-
-                //if (dataType) {
-                //    xhr.responseType = dataType;
-                //}
-
-                var finish = function() {
-                    xhr.onloadend = noop;
-                    xhr.onabort = noop;
-                    xhr.onprogress = noop;
-                    xhr.ontimeout = noop;
-                    xhr = null;
-                }
-                var onloadend = function() {
-                    var result, error = false
-                    if ((xhr.status >= 200 && xhr.status < 300) || xhr.status == 304 || (xhr.status == 0 && getAbsoluteUrl(url).startsWith('file:'))) {
-                        dataType = dataType || mimeToDataType(options.mimeType || xhr.getResponseHeader('content-type'));
-
-                        result = xhr.responseText;
-                        try {
-                            if (dataType == 'script') {
-                                eval(result);
-                            } else if (dataType == 'xml') {
-                                result = xhr.responseXML;
-                            } else if (dataType == 'json') {
-                                result = blankRE.test(result) ? null : JSON.parse(result);
-                            } else if (dataType == "blob") {
-                                result = Blob([xhrObj.response]);
-                            } else if (dataType == "arraybuffer") {
-                                result = xhr.reponse;
-                            }
-                        } catch (e) { 
-                            error = e;
-                        }
-
-                        if (error) {
-                            deferred.reject(error,xhr.status,xhr);
-                        } else {
-                            deferred.resolve(result,xhr.status,xhr);
-                        }
-                    } else {
-                        deferred.reject(new Error(xhr.statusText),xhr.status,xhr);
-                    }
-                    finish();
-                };
-
-                var onabort = function() {
-                    if (deferred) {
-                        deferred.reject(new Error("abort"),xhr.status,xhr);
-                    }
-                    finish();                 
-                }
- 
-                var ontimeout = function() {
-                    if (deferred) {
-                        deferred.reject(new Error("timeout"),xhr.status,xhr);
-                    }
-                    finish();                 
-                }
-
-                var onprogress = function(evt) {
-                    if (deferred) {
-                        deferred.notify(evt,xhr.status,xhr);
-                    }
-                }
-
-                xhr.onloadend = onloadend;
-                xhr.onabort = onabort;
-                xhr.ontimeout = ontimeout;
-                xhr.onprogress = onprogress;
-
-                xhr.open(type, url, async, user, password);
-               
-                if (headers) {
-                    for ( var key in headers) {
-                        var value = headers[key];
- 
-                        if(key.toLowerCase() === 'content-type'){
-                            contentType = value;
-                        } else {
-                           xhr.setRequestHeader(key, value);
-                        }
-                    }
-                }   
-
-                if  (contentType && contentType !== false){
-                    xhr.setRequestHeader('Content-Type', contentType);
-                }
-
-                if(!headers || !('X-Requested-With' in headers)){
-                    xhr.setRequestHeader('X-Requested-With', 'XMLHttpRequest');
-                }
-
-
-                //If basicAuthorizationToken is defined set its value into "Authorization" header
-                if (basicAuthorizationToken) {
-                    xhr.setRequestHeader("Authorization", basicAuthorizationToken);
-                }
-
-                xhr.send(options.data ? options.data : null);
-
-                return deferred.promise;
-
-            },
-
-            "abort": function() {
-                var _ = this._,
-                    xhr = _.xhr;
-
-                if (xhr) {
-                    xhr.abort();
-                }    
-            },
-
-
-            "request": function(args) {
-                return this._request(args);
-            },
-
-            get : function(args) {
-                args = args || {};
-                args.type = "GET";
-                return this._request(args);
-            },
-
-            post : function(args) {
-                args = args || {};
-                args.type = "POST";
-                return this._request(args);
-            },
-
-            patch : function(args) {
-                args = args || {};
-                args.type = "PATCH";
-                return this._request(args);
-            },
-
-            put : function(args) {
-                args = args || {};
-                args.type = "PUT";
-                return this._request(args);
-            },
-
-            del : function(args) {
-                args = args || {};
-                args.type = "DELETE";
-                return this._request(args);
-            },
-
-            "init": function(options) {
-                this._ = {
-                    options : options || {}
-                };
-            }
-        });
-
-        ["request","get","post","put","del","patch"].forEach(function(name){
-            Xhr[name] = function(url,args) {
-                var xhr = new Xhr({"url" : url});
-                return xhr[name](args);
-            };
-        });
-
-        Xhr.defaultOptions = XhrDefaultOptions;
-        Xhr.param = param;
-
-        return Xhr;
-    })();
-
-	return http.Xhr = Xhr;	
-});
-define('skylark-net-http/Upload',[
-    "skylark-langx-types",
-    "skylark-langx-objects",
-    "skylark-langx-arrays",
-    "skylark-langx-async/Deferred",
-    "skylark-langx-emitter/Evented",    
-    "./Xhr",
-    "./http"
-],function(types, objects, arrays, Deferred, Evented,Xhr, http){
-
-    var blobSlice = Blob.prototype.slice || Blob.prototype.webkitSlice || Blob.prototype.mozSlice;
-
-
-    /*
-     *Class for uploading files using xhr.
-     */
-    var Upload = Evented.inherit({
-        klassName : "Upload",
-
-        _construct : function(options) {
-            this._options = objects.mixin({
-                debug: false,
-                url: '/upload',
-                // maximum number of concurrent uploads
-                maxConnections: 999,
-                // To upload large files in smaller chunks, set the following option
-                // to a preferred maximum chunk size. If set to 0, null or undefined,
-                // or the browser does not support the required Blob API, files will
-                // be uploaded as a whole.
-                maxChunkSize: undefined,
-
-                onProgress: function(id, fileName, loaded, total){
-                },
-                onComplete: function(id, fileName){
-                },
-                onCancel: function(id, fileName){
-                },
-                onFailure : function(id,fileName,e) {                    
-                }
-            },options);
-
-            this._queue = [];
-            // params for files in queue
-            this._params = [];
-
-            this._files = [];
-            this._xhrs = [];
-
-            // current loaded size in bytes for each file
-            this._loaded = [];
-
-        },
-
-        /**
-         * Adds file to the queue
-         * Returns id to use with upload, cancel
-         **/
-        add: function(file){
-            return this._files.push(file) - 1;
-        },
-
-        /**
-         * Sends the file identified by id and additional query params to the server.
-         */
-        send: function(id, params){
-            if (!this._files[id]) {
-                // Already sended or canceled
-                return ;
-            }
-            if (this._queue.indexOf(id)>-1) {
-                // Already in the queue
-                return;
-            }
-            var len = this._queue.push(id);
-
-            var copy = objects.clone(params);
-
-            this._params[id] = copy;
-
-            // if too many active uploads, wait...
-            if (len <= this._options.maxConnections){
-                this._send(id, this._params[id]);
-            }     
-        },
-
-        /**
-         * Sends all files  and additional query params to the server.
-         */
-        sendAll: function(params){
-           for( var id = 0; id <this._files.length; id++) {
-                this.send(id,params);
-            }
-        },
-
-        /**
-         * Cancels file upload by id
-         */
-        cancel: function(id){
-            this._cancel(id);
-            this._dequeue(id);
-        },
-
-        /**
-         * Cancells all uploads
-         */
-        cancelAll: function(){
-            for (var i=0; i<this._queue.length; i++){
-                this._cancel(this._queue[i]);
-            }
-            this._queue = [];
-        },
-
-        getName: function(id){
-            var file = this._files[id];
-            return file.fileName != null ? file.fileName : file.name;
-        },
-
-        getSize: function(id){
-            var file = this._files[id];
-            return file.fileSize != null ? file.fileSize : file.size;
-        },
-
-        /**
-         * Returns uploaded bytes for file identified by id
-         */
-        getLoaded: function(id){
-            return this._loaded[id] || 0;
-        },
-
-
-        /**
-         * Sends the file identified by id and additional query params to the server
-         * @param {Object} params name-value string pairs
-         */
-        _send: function(id, params){
-            var options = this._options,
-                name = this.getName(id),
-                size = this.getSize(id),
-                chunkSize = options.maxChunkSize || 0,
-                curUploadingSize,
-                curLoadedSize = 0,
-                file = this._files[id],
-                args = {
-                    headers : {
-                    }                    
-                };
-
-            this._loaded[id] = this._loaded[id] || 0;
-
-            var xhr = this._xhrs[id] = new Xhr({
-                url : options.url
-            });
-
-            if (chunkSize)  {
-
-                args.data = blobSlice.call(
-                    file,
-                    this._loaded[id],
-                    this._loaded[id] + chunkSize,
-                    file.type
-                );
-                // Store the current chunk size, as the blob itself
-                // will be dereferenced after data processing:
-                curUploadingSize = args.data.size;
-                // Expose the chunk bytes position range:
-                args.headers["content-range"] = 'bytes ' + this._loaded[id] + '-' +
-                    (this._loaded[id] + curUploadingSize - 1) + '/' + size;
-                args.headers["Content-Type"] = "application/octet-stream";
-            }  else {
-                curUploadingSize = size;
-                var formParamName =  params.formParamName,
-                    formData = params.formData;
-
-                if (formParamName) {
-                    if (!formData) {
-                        formData = new FormData();
-                    }
-                    formData.append(formParamName,file);
-                    args.data = formData;
-    
-                } else {
-                    args.headers["Content-Type"] = file.type || "application/octet-stream";
-                    args.data = file;
-                }
-            }
-
-
-            var self = this;
-            xhr.post(
-                args
-            ).progress(function(e){
-                if (e.lengthComputable){
-                    curLoadedSize = curLoadedSize + e.loaded;
-                    self._loaded[id] = self._loaded[id] + e.loaded;
-                    self._options.onProgress(id, name, self._loaded[id], size);
-                }
-            }).then(function(){
-                if (!self._files[id]) {
-                    // the request was aborted/cancelled
-                    return;
-                }
-
-                if (curLoadedSize < curUploadingSize) {
-                    // Create a progress event if no final progress event
-                    // with loaded equaling total has been triggered
-                    // for this chunk:
-                    self._loaded[id] = self._loaded[id] + curUploadingSize - curLoadedSize;
-                    self._options.onProgress(id, name, self._loaded[id], size);                    
-                }
-
-                if (self._loaded[id] <size) {
-                    // File upload not yet complete,
-                    // continue with the next chunk:
-                    self._send(id,params);
-                } else {
-                    self._options.onComplete(id,name);
-
-                    self._files[id] = null;
-                    self._xhrs[id] = null;
-                    self._dequeue(id);
-                }
-
-
-            }).catch(function(e){
-                self._options.onFailure(id,name,e);
-
-                self._files[id] = null;
-                self._xhrs[id] = null;
-                self._dequeue(id);
-            });
-        },
-
-        _cancel: function(id){
-            this._options.onCancel(id, this.getName(id));
-
-            this._files[id] = null;
-
-            if (this._xhrs[id]){
-                this._xhrs[id].abort();
-                this._xhrs[id] = null;
-            }
-        },
-
-        /**
-         * Returns id of files being uploaded or
-         * waiting for their turn
-         */
-        getQueue: function(){
-            return this._queue;
-        },
-
-
-        /**
-         * Removes element from queue, starts upload of next
-         */
-        _dequeue: function(id){
-            var i = arrays.inArray(id,this._queue);
-            this._queue.splice(i, 1);
-
-            var max = this._options.maxConnections;
-
-            if (this._queue.length >= max && i < max){
-                var nextId = this._queue[max-1];
-                this._send(nextId, this._params[nextId]);
-            }
-        }
-    });
-
-    return http.Upload = Upload;    
-});
 define('skylark-domx-geom/geom',[
     "skylark-langx/skylark",
     "skylark-langx/langx",
@@ -11933,8 +11645,11 @@ define('skylark-domx-fx/main',[
 define('skylark-domx-fx', ['skylark-domx-fx/main'], function (main) { return main; });
 
 define('skylark-domx-plugins/plugins',[
-    "skylark-langx/skylark",
-    "skylark-langx/langx",
+    "skylark-langx-ns",
+    "skylark-langx-types",
+    "skylark-langx-objects",
+    "skylark-langx-funcs",
+    "skylark-langx-events/Emitter",
     "skylark-domx-noder",
     "skylark-domx-data",
     "skylark-domx-eventer",
@@ -11944,7 +11659,22 @@ define('skylark-domx-plugins/plugins',[
     "skylark-domx-fx",
     "skylark-domx-query",
     "skylark-domx-velm"
-], function(skylark, langx, noder, datax, eventer, finder, geom, styler, fx, $, elmx) {
+], function(
+    skylark,
+    types,
+    objects,
+    funcs,
+    Emitter, 
+    noder, 
+    datax, 
+    eventer, 
+    finder, 
+    geom, 
+    styler, 
+    fx, 
+    $, 
+    elmx
+) {
     "use strict";
 
     var slice = Array.prototype.slice,
@@ -12023,10 +11753,12 @@ define('skylark-domx-plugins/plugins',[
                                 "attempted to call method '" + methodName + "'" );
                         }
 
-                        if ( !langx.isFunction( plugin[ methodName ] ) || methodName.charAt( 0 ) === "_" ) {
+                        if ( !types.isFunction( plugin[ methodName ] ) || methodName.charAt( 0 ) === "_" ) {
                             throw new Error( "no such method '" + methodName + "' for " + pluginName +
                                 " plugin instance" );
                         }
+
+                        args = slice.call(args,1); //remove method name
 
                         var ret = plugin[methodName].apply(plugin,args);
                         if (ret == plugin) {
@@ -12051,7 +11783,7 @@ define('skylark-domx-plugins/plugins',[
         pluginKlasses[pluginName] = pluginKlass;
 
         if (shortcutName) {
-            if (instanceDataName && langx.isFunction(instanceDataName)) {
+            if (instanceDataName && types.isFunction(instanceDataName)) {
                 extfn = instanceDataName;
                 instanceDataName = null;
             } 
@@ -12093,7 +11825,7 @@ define('skylark-domx-plugins/plugins',[
     }
 
  
-    var Plugin =   langx.Evented.inherit({
+    var Plugin =   Emitter.inherit({
         klassName: "Plugin",
 
         _construct : function(elm,options) {
@@ -12119,15 +11851,15 @@ define('skylark-domx-plugins/plugins',[
             for (var i=0;i<ctors.length;i++) {
               ctor = ctors[i];
               if (ctor.prototype.hasOwnProperty("options")) {
-                langx.mixin(defaults,ctor.prototype.options,true);
+                objects.mixin(defaults,ctor.prototype.options,true);
               }
               if (ctor.hasOwnProperty("options")) {
-                langx.mixin(defaults,ctor.options,true);
+                objects.mixin(defaults,ctor.options,true);
               }
             }
           }
           Object.defineProperty(this,"options",{
-            value :langx.mixin({},defaults,options,true)
+            value :objects.mixin({},defaults,options,true)
           });
 
           //return this.options = langx.mixin({},defaults,options);
@@ -12136,15 +11868,16 @@ define('skylark-domx-plugins/plugins',[
 
 
         destroy: function() {
-            var that = this;
 
             this._destroy();
-            // We can probably remove the unbind calls in 2.0
-            // all event bindings should go through this._on()
+
+            // remove all event lisener
+            this.unlistenTo();
+            // remove data 
             datax.removeData(this._elm,this.pluginName );
         },
 
-        _destroy: langx.noop,
+        _destroy: funcs.noop,
 
         _delay: function( handler, delay ) {
             function handlerProxy() {
@@ -12153,6 +11886,17 @@ define('skylark-domx-plugins/plugins',[
             }
             var instance = this;
             return setTimeout( handlerProxy, delay || 0 );
+        },
+
+        elmx : function(elm) {
+            elm = elm || this._elm;
+            return elmx(elm);
+
+        },
+
+        $ : function(elm) {
+            elm = elm || this._elm;
+            return $(elm);
         },
 
         option: function( key, value ) {
@@ -12164,7 +11908,7 @@ define('skylark-domx-plugins/plugins',[
             if ( arguments.length === 0 ) {
 
                 // Don't return a reference to the internal hash
-                return langx.mixin( {}, this.options );
+                return objects.mixin( {}, this.options );
             }
 
             if ( typeof key === "string" ) {
@@ -12174,7 +11918,7 @@ define('skylark-domx-plugins/plugins',[
                 parts = key.split( "." );
                 key = parts.shift();
                 if ( parts.length ) {
-                    curOption = options[ key ] = langx.mixin( {}, this.options[ key ] );
+                    curOption = options[ key ] = objects.mixin( {}, this.options[ key ] );
                     for ( i = 0; i < parts.length - 1; i++ ) {
                         curOption[ parts[ i ] ] = curOption[ parts[ i ] ] || {};
                         curOption = curOption[ parts[ i ] ];
@@ -12227,6 +11971,10 @@ define('skylark-domx-plugins/plugins',[
 
     });
 
+    Plugin.instantiate = function(elm,options) {
+        return instantiate(elm,this.prototype.pluginName,options);
+    };
+    
     $.fn.plugin = function(name,options) {
         var args = slice.call( arguments, 1 ),
             self = this,
@@ -12240,7 +11988,7 @@ define('skylark-domx-plugins/plugins',[
 
     elmx.partial("plugin",function(name,options) {
         var args = slice.call( arguments, 1 );
-        return instantiate.apply(this,[this.domNode,name].concat(args));
+        return instantiate.apply(this,[this._elm,name].concat(args));
     }); 
 
 
@@ -12248,7 +11996,7 @@ define('skylark-domx-plugins/plugins',[
         return plugins;
     }
      
-    langx.mixin(plugins, {
+    objects.mixin(plugins, {
         instantiate,
         Plugin,
         register,
@@ -12264,6 +12012,757 @@ define('skylark-domx-plugins/main',[
 });
 define('skylark-domx-plugins', ['skylark-domx-plugins/main'], function (main) { return main; });
 
+define('skylark-domx-files/SingleUploader',[
+	"skylark-langx-emitter",
+	"skylark-langx-async/Deferred",
+    "skylark-domx-velm",
+    "skylark-domx-plugins",
+	"./files",
+	"./dropzone",
+	"./pastezone",
+	"./picker"
+],function(
+	Emitter, 
+	Deferred, 
+	elmx,
+	plugins,
+	files
+) {
+	//import ZipLoader from 'zip-loader';
+
+	/**
+	 * Watches an element for file drops, parses to create a filemap hierarchy,
+	 * and emits the result.
+	 */
+	class SingleUploader extends plugins.Plugin {
+		get klassName() {
+	    	return "SingleUploader";
+    	} 
+
+    	get pluginName(){
+      		return "lark.singleuploader";
+    	} 
+
+		get options () {
+      		return {
+	            selectors : {
+	              picker   : ".file-picker",
+	              dropzone : ".file-dropzone",
+	              pastezone: ".file-pastezone",
+
+	              startUploads: '.start-uploads',
+	              cancelUploads: '.cancel-uploads',
+	            }
+	     	}
+		}
+
+
+	  /**
+	   * @param  {Element} elm
+	   * @param  [options] 
+	   */
+	  constructor (elm, options) {
+	  	super(elm,options);
+
+        this._velm = elmx(this._elm);
+
+	  	this._initFileHandlers();
+
+	}
+
+    _initFileHandlers () {
+        var self = this;
+
+        var selectors = this.options.selectors,
+        	dzSelector = selectors.dropzone,
+        	pzSelector = selectors.pastezone,
+        	pkSelector = selectors.picker;
+
+        if (dzSelector) {
+			this._velm.$(dzSelector).dropzone({
+                dropped : function (files) {
+                    self._addFile(files[0]);
+                }
+			});
+        }
+
+
+        if (pzSelector) {
+            this._velm.$(pzSelector).pastezone({
+                pasted : function (files) {
+                    self._addFile(files[0]);
+                }
+            });                
+        }
+
+        if (pkSelector) {
+            this._velm.$(pkSelector).picker({
+                multiple: true,
+                picked : function (files) {
+                    self._addFile(files[0]);
+                }
+            });                
+        }
+    }
+
+     _addFile(file) {
+        this.emit('added', file);	  
+     }
+
+
+	  /**
+	   * Destroys the instance.
+	   */
+	  destroy () {
+	  }
+
+
+	}
+
+	return files.SingleUploader = SingleUploader;
+
+});
+
+ 
+define('skylark-net-http/http',[
+  "skylark-langx-ns/ns",
+],function(skylark){
+	return skylark.attach("net.http",{});
+});
+define('skylark-net-http/Xhr',[
+  "skylark-langx-ns/ns",
+  "skylark-langx-types",
+  "skylark-langx-objects",
+  "skylark-langx-arrays",
+  "skylark-langx-funcs",
+  "skylark-langx-async/Deferred",
+  "skylark-langx-emitter/Evented",
+  "./http"
+],function(skylark,types,objects,arrays,funcs,Deferred,Evented,http){
+
+    var each = objects.each,
+        mixin = objects.mixin,
+        noop = funcs.noop,
+        isArray = types.isArray,
+        isFunction = types.isFunction,
+        isPlainObject = types.isPlainObject,
+        type = types.type;
+ 
+     var getAbsoluteUrl = (function() {
+        var a;
+
+        return function(url) {
+            if (!a) a = document.createElement('a');
+            a.href = url;
+
+            return a.href;
+        };
+    })();
+   
+    var Xhr = (function(){
+        var jsonpID = 0,
+            key,
+            name,
+            rscript = /<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi,
+            scriptTypeRE = /^(?:text|application)\/javascript/i,
+            xmlTypeRE = /^(?:text|application)\/xml/i,
+            jsonType = 'application/json',
+            htmlType = 'text/html',
+            blankRE = /^\s*$/;
+
+        var XhrDefaultOptions = {
+            async: true,
+
+            // Default type of request
+            type: 'GET',
+            // Callback that is executed before request
+            beforeSend: noop,
+            // Callback that is executed if the request succeeds
+            success: noop,
+            // Callback that is executed the the server drops error
+            error: noop,
+            // Callback that is executed on request complete (both: error and success)
+            complete: noop,
+            // The context for the callbacks
+            context: null,
+            // Whether to trigger "global" Ajax events
+            global: true,
+
+            // MIME types mapping
+            // IIS returns Javascript as "application/x-javascript"
+            accepts: {
+                script: 'text/javascript, application/javascript, application/x-javascript',
+                json: 'application/json',
+                xml: 'application/xml, text/xml',
+                html: 'text/html',
+                text: 'text/plain'
+            },
+            // Whether the request is to another domain
+            crossDomain: false,
+            // Default timeout
+            timeout: 0,
+            // Whether data should be serialized to string
+            processData: false,
+            // Whether the browser should be allowed to cache GET responses
+            cache: true,
+
+            traditional : false,
+            
+            xhrFields : {
+                withCredentials : false
+            }
+        };
+
+        function mimeToDataType(mime) {
+            if (mime) {
+                mime = mime.split(';', 2)[0];
+            }
+            if (mime) {
+                if (mime == htmlType) {
+                    return "html";
+                } else if (mime == jsonType) {
+                    return "json";
+                } else if (scriptTypeRE.test(mime)) {
+                    return "script";
+                } else if (xmlTypeRE.test(mime)) {
+                    return "xml";
+                }
+            }
+            return "text";
+        }
+
+        function appendQuery(url, query) {
+            if (query == '') return url
+            return (url + '&' + query).replace(/[&?]{1,2}/, '?')
+        }
+
+        // serialize payload and append it to the URL for GET requests
+        function serializeData(options) {
+            options.data = options.data || options.query;
+            if (options.processData && options.data && type(options.data) != "string") {
+                options.data = param(options.data, options.traditional);
+            }
+            if (options.data && (!options.type || options.type.toUpperCase() == 'GET')) {
+                if (type(options.data) != "string") {
+                    options.data = param(options.data, options.traditional);
+                }
+                options.url = appendQuery(options.url, options.data);
+                options.data = undefined;
+            }
+        }
+        
+        function serialize(params, obj, traditional, scope) {
+            var t, array = isArray(obj),
+                hash = isPlainObject(obj)
+            each(obj, function(key, value) {
+                t =type(value);
+                if (scope) key = traditional ? scope :
+                    scope + '[' + (hash || t == 'object' || t == 'array' ? key : '') + ']'
+                // handle data in serializeArray() format
+                if (!scope && array) params.add(value.name, value.value)
+                // recurse into nested objects
+                else if (t == "array" || (!traditional && t == "object"))
+                    serialize(params, value, traditional, key)
+                else params.add(key, value)
+            })
+        }
+
+        var param = function(obj, traditional) {
+            var params = []
+            params.add = function(key, value) {
+                if (isFunction(value)) {
+                  value = value();
+                }
+                if (value == null) {
+                  value = "";
+                }
+                this.push(encodeURIComponent(key) + '=' + encodeURIComponent(value));
+            };
+            serialize(params, obj, traditional)
+            return params.join('&').replace(/%20/g, '+')
+        };
+
+        var Xhr = Evented.inherit({
+            klassName : "Xhr",
+
+            _request  : function(args) {
+                var _ = this._,
+                    self = this,
+                    options = mixin({},XhrDefaultOptions,_.options,args),
+                    xhr = _.xhr = new XMLHttpRequest();
+
+                serializeData(options)
+
+                if (options.beforeSend) {
+                    options.beforeSend.call(this, xhr, options);
+                }                
+
+                var dataType = options.dataType || options.handleAs,
+                    mime = options.mimeType || options.accepts[dataType],
+                    headers = options.headers,
+                    xhrFields = options.xhrFields,
+                    isFormData = options.data && options.data instanceof FormData,
+                    basicAuthorizationToken = options.basicAuthorizationToken,
+                    type = options.type,
+                    url = options.url,
+                    async = options.async,
+                    user = options.user , 
+                    password = options.password,
+                    deferred = new Deferred(),
+                    contentType = options.contentType || (isFormData ? false : 'application/x-www-form-urlencoded');
+
+                if (xhrFields) {
+                    for (name in xhrFields) {
+                        xhr[name] = xhrFields[name];
+                    }
+                }
+
+                if (mime && mime.indexOf(',') > -1) {
+                    mime = mime.split(',', 2)[0];
+                }
+                if (mime && xhr.overrideMimeType) {
+                    xhr.overrideMimeType(mime);
+                }
+
+                //if (dataType) {
+                //    xhr.responseType = dataType;
+                //}
+
+                var finish = function() {
+                    xhr.onloadend = noop;
+                    xhr.onabort = noop;
+                    xhr.onprogress = noop;
+                    xhr.ontimeout = noop;
+                    xhr = null;
+                }
+                var onloadend = function() {
+                    var result, error = false
+                    if ((xhr.status >= 200 && xhr.status < 300) || xhr.status == 304 || (xhr.status == 0 && getAbsoluteUrl(url).startsWith('file:'))) {
+                        dataType = dataType || mimeToDataType(options.mimeType || xhr.getResponseHeader('content-type'));
+
+                        result = xhr.responseText;
+                        try {
+                            if (dataType == 'script') {
+                                eval(result);
+                            } else if (dataType == 'xml') {
+                                result = xhr.responseXML;
+                            } else if (dataType == 'json') {
+                                result = blankRE.test(result) ? null : JSON.parse(result);
+                            } else if (dataType == "blob") {
+                                result = Blob([xhrObj.response]);
+                            } else if (dataType == "arraybuffer") {
+                                result = xhr.reponse;
+                            }
+                        } catch (e) { 
+                            error = e;
+                        }
+
+                        if (error) {
+                            deferred.reject(error,xhr.status,xhr);
+                        } else {
+                            deferred.resolve(result,xhr.status,xhr);
+                        }
+                    } else {
+                        deferred.reject(new Error(xhr.statusText),xhr.status,xhr);
+                    }
+                    finish();
+                };
+
+                var onabort = function() {
+                    if (deferred) {
+                        deferred.reject(new Error("abort"),xhr.status,xhr);
+                    }
+                    finish();                 
+                }
+ 
+                var ontimeout = function() {
+                    if (deferred) {
+                        deferred.reject(new Error("timeout"),xhr.status,xhr);
+                    }
+                    finish();                 
+                }
+
+                var onprogress = function(evt) {
+                    if (deferred) {
+                        deferred.notify(evt,xhr.status,xhr);
+                    }
+                }
+
+                xhr.onloadend = onloadend;
+                xhr.onabort = onabort;
+                xhr.ontimeout = ontimeout;
+                xhr.onprogress = onprogress;
+
+                xhr.open(type, url, async, user, password);
+               
+                if (headers) {
+                    for ( var key in headers) {
+                        var value = headers[key];
+ 
+                        if(key.toLowerCase() === 'content-type'){
+                            contentType = value;
+                        } else {
+                           xhr.setRequestHeader(key, value);
+                        }
+                    }
+                }   
+
+                if  (contentType && contentType !== false){
+                    xhr.setRequestHeader('Content-Type', contentType);
+                }
+
+                if(!headers || !('X-Requested-With' in headers)){
+                    xhr.setRequestHeader('X-Requested-With', 'XMLHttpRequest');
+                }
+
+
+                //If basicAuthorizationToken is defined set its value into "Authorization" header
+                if (basicAuthorizationToken) {
+                    xhr.setRequestHeader("Authorization", basicAuthorizationToken);
+                }
+
+                xhr.send(options.data ? options.data : null);
+
+                return deferred.promise;
+
+            },
+
+            "abort": function() {
+                var _ = this._,
+                    xhr = _.xhr;
+
+                if (xhr) {
+                    xhr.abort();
+                }    
+            },
+
+
+            "request": function(args) {
+                return this._request(args);
+            },
+
+            get : function(args) {
+                args = args || {};
+                args.type = "GET";
+                return this._request(args);
+            },
+
+            post : function(args) {
+                args = args || {};
+                args.type = "POST";
+                return this._request(args);
+            },
+
+            patch : function(args) {
+                args = args || {};
+                args.type = "PATCH";
+                return this._request(args);
+            },
+
+            put : function(args) {
+                args = args || {};
+                args.type = "PUT";
+                return this._request(args);
+            },
+
+            del : function(args) {
+                args = args || {};
+                args.type = "DELETE";
+                return this._request(args);
+            },
+
+            "init": function(options) {
+                this._ = {
+                    options : options || {}
+                };
+            }
+        });
+
+        ["request","get","post","put","del","patch"].forEach(function(name){
+            Xhr[name] = function(url,args) {
+                var xhr = new Xhr({"url" : url});
+                return xhr[name](args);
+            };
+        });
+
+        Xhr.defaultOptions = XhrDefaultOptions;
+        Xhr.param = param;
+
+        return Xhr;
+    })();
+
+	return http.Xhr = Xhr;	
+});
+define('skylark-net-http/Upload',[
+    "skylark-langx-types",
+    "skylark-langx-objects",
+    "skylark-langx-arrays",
+    "skylark-langx-async/Deferred",
+    "skylark-langx-emitter/Evented",    
+    "./Xhr",
+    "./http"
+],function(types, objects, arrays, Deferred, Evented,Xhr, http){
+
+    var blobSlice = Blob.prototype.slice || Blob.prototype.webkitSlice || Blob.prototype.mozSlice;
+
+
+    /*
+     *Class for uploading files using xhr.
+     */
+    var Upload = Evented.inherit({
+        klassName : "Upload",
+
+        _construct : function(options) {
+            this._options = objects.mixin({
+                debug: false,
+                url: '/upload',
+                // maximum number of concurrent uploads
+                maxConnections: 999,
+                // To upload large files in smaller chunks, set the following option
+                // to a preferred maximum chunk size. If set to 0, null or undefined,
+                // or the browser does not support the required Blob API, files will
+                // be uploaded as a whole.
+                maxChunkSize: undefined,
+
+                onProgress: function(id, fileName, loaded, total){
+                },
+                onComplete: function(id, fileName){
+                },
+                onCancel: function(id, fileName){
+                },
+                onFailure : function(id,fileName,e) {                    
+                }
+            },options);
+
+            this._queue = [];
+            // params for files in queue
+            this._params = [];
+
+            this._files = [];
+            this._xhrs = [];
+
+            // current loaded size in bytes for each file
+            this._loaded = [];
+
+        },
+
+        /**
+         * Adds file to the queue
+         * Returns id to use with upload, cancel
+         **/
+        add: function(file){
+            return this._files.push(file) - 1;
+        },
+
+        /**
+         * Sends the file identified by id and additional query params to the server.
+         */
+        send: function(id, params){
+            if (!this._files[id]) {
+                // Already sended or canceled
+                return ;
+            }
+            if (this._queue.indexOf(id)>-1) {
+                // Already in the queue
+                return;
+            }
+            var len = this._queue.push(id);
+
+            var copy = objects.clone(params);
+
+            this._params[id] = copy;
+
+            // if too many active uploads, wait...
+            if (len <= this._options.maxConnections){
+                this._send(id, this._params[id]);
+            }     
+        },
+
+        /**
+         * Sends all files  and additional query params to the server.
+         */
+        sendAll: function(params){
+           for( var id = 0; id <this._files.length; id++) {
+                this.send(id,params);
+            }
+        },
+
+        /**
+         * Cancels file upload by id
+         */
+        cancel: function(id){
+            this._cancel(id);
+            this._dequeue(id);
+        },
+
+        /**
+         * Cancells all uploads
+         */
+        cancelAll: function(){
+            for (var i=0; i<this._queue.length; i++){
+                this._cancel(this._queue[i]);
+            }
+            this._queue = [];
+        },
+
+        getName: function(id){
+            var file = this._files[id];
+            return file.fileName != null ? file.fileName : file.name;
+        },
+
+        getSize: function(id){
+            var file = this._files[id];
+            return file.fileSize != null ? file.fileSize : file.size;
+        },
+
+        /**
+         * Returns uploaded bytes for file identified by id
+         */
+        getLoaded: function(id){
+            return this._loaded[id] || 0;
+        },
+
+
+        /**
+         * Sends the file identified by id and additional query params to the server
+         * @param {Object} params name-value string pairs
+         */
+        _send: function(id, params){
+            var options = this._options,
+                name = this.getName(id),
+                size = this.getSize(id),
+                chunkSize = options.maxChunkSize || 0,
+                curUploadingSize,
+                curLoadedSize = 0,
+                file = this._files[id],
+                args = {
+                    headers : {
+                    }                    
+                };
+
+            this._loaded[id] = this._loaded[id] || 0;
+
+            var xhr = this._xhrs[id] = new Xhr({
+                url : options.url
+            });
+
+            if (chunkSize)  {
+
+                args.data = blobSlice.call(
+                    file,
+                    this._loaded[id],
+                    this._loaded[id] + chunkSize,
+                    file.type
+                );
+                // Store the current chunk size, as the blob itself
+                // will be dereferenced after data processing:
+                curUploadingSize = args.data.size;
+                // Expose the chunk bytes position range:
+                args.headers["content-range"] = 'bytes ' + this._loaded[id] + '-' +
+                    (this._loaded[id] + curUploadingSize - 1) + '/' + size;
+                args.headers["Content-Type"] = "application/octet-stream";
+            }  else {
+                curUploadingSize = size;
+                var formParamName =  params.formParamName,
+                    formData = params.formData;
+
+                if (formParamName) {
+                    if (!formData) {
+                        formData = new FormData();
+                    }
+                    formData.append(formParamName,file);
+                    args.data = formData;
+    
+                } else {
+                    args.headers["Content-Type"] = file.type || "application/octet-stream";
+                    args.data = file;
+                }
+            }
+
+
+            var self = this;
+            xhr.post(
+                args
+            ).progress(function(e){
+                if (e.lengthComputable){
+                    curLoadedSize = curLoadedSize + e.loaded;
+                    self._loaded[id] = self._loaded[id] + e.loaded;
+                    self._options.onProgress(id, name, self._loaded[id], size);
+                }
+            }).then(function(){
+                if (!self._files[id]) {
+                    // the request was aborted/cancelled
+                    return;
+                }
+
+                if (curLoadedSize < curUploadingSize) {
+                    // Create a progress event if no final progress event
+                    // with loaded equaling total has been triggered
+                    // for this chunk:
+                    self._loaded[id] = self._loaded[id] + curUploadingSize - curLoadedSize;
+                    self._options.onProgress(id, name, self._loaded[id], size);                    
+                }
+
+                if (self._loaded[id] <size) {
+                    // File upload not yet complete,
+                    // continue with the next chunk:
+                    self._send(id,params);
+                } else {
+                    self._options.onComplete(id,name);
+
+                    self._files[id] = null;
+                    self._xhrs[id] = null;
+                    self._dequeue(id);
+                }
+
+
+            }).catch(function(e){
+                self._options.onFailure(id,name,e);
+
+                self._files[id] = null;
+                self._xhrs[id] = null;
+                self._dequeue(id);
+            });
+        },
+
+        _cancel: function(id){
+            this._options.onCancel(id, this.getName(id));
+
+            this._files[id] = null;
+
+            if (this._xhrs[id]){
+                this._xhrs[id].abort();
+                this._xhrs[id] = null;
+            }
+        },
+
+        /**
+         * Returns id of files being uploaded or
+         * waiting for their turn
+         */
+        getQueue: function(){
+            return this._queue;
+        },
+
+
+        /**
+         * Removes element from queue, starts upload of next
+         */
+        _dequeue: function(id){
+            var i = arrays.inArray(id,this._queue);
+            this._queue.splice(i, 1);
+
+            var max = this._options.maxConnections;
+
+            if (this._queue.length >= max && i < max){
+                var nextId = this._queue[max-1];
+                this._send(nextId, this._params[nextId]);
+            }
+        }
+    });
+
+    return http.Upload = Upload;    
+});
 define('skylark-domx-files/MultiUploader',[
   "skylark-langx/skylark",
   "skylark-langx/langx",
@@ -12722,23 +13221,12 @@ define('skylark-domx-files/MultiUploader',[
 });
 define('skylark-domx-files/main',[
 	"./files",
-	"skylark-domx-velm",
-	"skylark-domx-query",
 	"./dropzone",
 	"./pastezone",
 	"./picker",
+	"./SingleUploader",
 	"./MultiUploader"
-],function(files,velm,$){
-	velm.delegate([
-		"dropzone",
-		"pastezone",
-		"picker"
-	],files);
-
-    $.fn.pastezone = $.wraps.wrapper_every_act(files.pastezone, files);
-    $.fn.dropzone = $.wraps.wrapper_every_act(files.dropzone, files);
-    $.fn.picker = $.wraps.wrapper_every_act(files.picker, files);
-
+],function(files){
 	return files;
 });
 define('skylark-domx-files', ['skylark-domx-files/main'], function (main) { return main; });
@@ -13076,8 +13564,10 @@ define('skylark-widgets-base/base',[
 	return skylark.attach("widgets.base",{});
 });
 define('skylark-widgets-base/Widget',[
-  "skylark-langx/skylark",
-  "skylark-langx/langx",
+  "skylark-langx-ns",
+  "skylark-langx-types",
+  "skylark-langx-objects",
+  "skylark-langx-events",
   "skylark-domx-browser",
   "skylark-domx-data",
   "skylark-domx-eventer",
@@ -13090,7 +13580,7 @@ define('skylark-widgets-base/Widget',[
   "skylark-domx-plugins",
   "skylark-data-collection/HashMap",
   "./base"
-],function(skylark,langx,browser,datax,eventer,noder,files,geom,elmx,$,fx, plugins,HashMap,base){
+],function(skylark,types,objects,events,browser,datax,eventer,noder,files,geom,elmx,$,fx, plugins,HashMap,base){
 
 /*---------------------------------------------------------------------------------*/
 
@@ -13100,7 +13590,7 @@ define('skylark-widgets-base/Widget',[
     _elmx : elmx,
 
     _construct : function(elm,options) {
-        if (langx.isHtmlNode(elm)) {
+        if (types.isHtmlNode(elm)) {
           options = this._parse(elm,options);
         } else {
           options = elm;
@@ -13129,7 +13619,7 @@ define('skylark-widgets-base/Widget',[
           for (var categoryName in addonCategoryOptions) {
               for (var i =0;i < addonCategoryOptions[categoryName].length; i++ ) {
                 var addonOption = addonCategoryOptions[categoryName][i];
-                if (langx.isString(addonOption)) {
+                if (types.isString(addonOption)) {
                   var addonName = addonOption,
                       addonSetting = addons[categoryName][addonName],
                       addonCtor = addonSetting.ctor ? addonSetting.ctor : addonSetting;
@@ -13160,7 +13650,7 @@ define('skylark-widgets-base/Widget',[
       if (optionsAttr) {
          //var options1 = JSON.parse("{" + optionsAttr + "}");
          var options1 = eval("({" + optionsAttr + "})");
-         options = langx.mixin(options1,options); 
+         options = objects.mixin(options1,options); 
       }
       return options || {};
     },
@@ -13275,9 +13765,9 @@ define('skylark-widgets-base/Widget',[
       var category = this._addons[categoryName] = this._addons[categoryName] || {};
 
       if (settings == undefined) {
-        return langx.clone(category || null);
+        return objects.clone(category || null);
       } else {
-        langx.mixin(category,settings);
+        objects.mixin(category,settings);
       }
     },
 
@@ -13428,10 +13918,10 @@ define('skylark-widgets-base/Widget',[
     },
 
     emit : function(type,params) {
-      var e = langx.Emitter.createEvent(type,{
+      var e = events.createEvent(type,{
         data : params
       });
-      return langx.Emitter.prototype.emit.call(this,e,params);
+      return events.Emitter.prototype.emit.call(this,e,params);
     },
 
     /**
@@ -13515,12 +14005,6 @@ define('skylark-widgets-base/Widget',[
   };
 
   return base.Widget = Widget;
-});
-
-define('skylark-widgets-swt/Widget',[
-  "skylark-widgets-base/Widget"
-],function(Widget){
-  return Widget;
 });
 
 define('skylark-nprogress/nprogress',[],function(){
@@ -15673,11 +16157,11 @@ define('skylark-widgets-shells/Shell',[
 	"skylark-domx-scripter",
 	"skylark-domx-finder",
 	"skylark-domx-query",
-	"skylark-widgets-swt/Widget",
+	"skylark-widgets-base/Widget",
 	"skylark-nprogress",
 	"skylark-bootbox4",
     "skylark-visibility",
-  "skylark-tinycon",
+    "skylark-tinycon",
 	"./shells"
 ],function(langx, css, scripter, finder,$,Widget,nprogress,bootbox,Visibility, Tinycon,shells){
 	function createAlert(params,template) {
@@ -16018,6 +16502,139 @@ define('skylark-widgets-shells/Shell',[
 
 });
 
+define('skylark-domx-spy/spy',[
+  "skylark-langx/skylark",
+],function(skylark){
+
+
+	return skylark.attach("domx.spy",{});
+
+});
+
+define('skylark-domx-spy/Affix',[
+  "skylark-langx/langx",
+  "skylark-domx-browser",
+  "skylark-domx-eventer",
+  "skylark-domx-noder",
+  "skylark-domx-geom",
+  "skylark-domx-query",
+  "skylark-domx-plugins",
+  "./spy"
+],function(langx,browser,eventer,noder,geom,$,plugins,spy){
+
+  'use strict';
+
+  // AFFIX CLASS DEFINITION
+  // ======================
+
+  var Affix = spy.Affix = plugins.Plugin.inherit({
+        klassName: "Affix",
+
+        pluginName : "domx.affix",
+
+        options : {
+          offset: 0,
+          target: window
+        },
+
+        _construct : function(elm,options) {
+          this.overrided(elm,options);
+
+          this.$target = $(this.options.target)
+            .on('scroll.affix.data-api', langx.proxy(this.checkPosition, this))
+            .on('click.affix.data-api',  langx.proxy(this.checkPositionWithEventLoop, this))
+
+          this.$element     = this.$()
+          this.affixed      = null;
+          this.unpin        = null;
+          this.pinnedOffset = null;
+
+          this.checkPosition();
+        },
+
+        getState : function (scrollHeight, height, offsetTop, offsetBottom) {
+          var scrollTop    = this.$target.scrollTop()
+          var position     = this.$element.offset()
+          var targetHeight = this.$target.height()
+
+          if (offsetTop != null && this.affixed == 'top') return scrollTop < offsetTop ? 'top' : false
+
+          if (this.affixed == 'bottom') {
+            if (offsetTop != null) return (scrollTop + this.unpin <= position.top) ? false : 'bottom'
+            return (scrollTop + targetHeight <= scrollHeight - offsetBottom) ? false : 'bottom'
+          }
+
+          var initializing   = this.affixed == null
+          var colliderTop    = initializing ? scrollTop : position.top
+          var colliderHeight = initializing ? targetHeight : height
+
+          if (offsetTop != null && scrollTop <= offsetTop) return 'top'
+          if (offsetBottom != null && (colliderTop + colliderHeight >= scrollHeight - offsetBottom)) return 'bottom'
+
+          return false
+        },
+
+        getPinnedOffset : function () {
+          if (this.pinnedOffset) return this.pinnedOffset
+          this.$element.removeClass(Affix.RESET).addClass('affix')
+          var scrollTop = this.$target.scrollTop()
+          var position  = this.$element.offset()
+          return (this.pinnedOffset = position.top - scrollTop)
+        },
+
+        checkPositionWithEventLoop : function () {
+          setTimeout(langx.proxy(this.checkPosition, this), 1)
+        },
+
+        checkPosition : function () {
+          if (!this.$element.is(':visible')) return
+
+          var height       = this.$element.height()
+          var offset       = this.options.offset
+          var offsetTop    = offset.top
+          var offsetBottom = offset.bottom
+          var scrollHeight = Math.max($(document).height(), $(document.body).height())
+
+          if (typeof offset != 'object')         offsetBottom = offsetTop = offset
+          if (typeof offsetTop == 'function')    offsetTop    = offset.top(this.$element)
+          if (typeof offsetBottom == 'function') offsetBottom = offset.bottom(this.$element)
+
+          var affix = this.getState(scrollHeight, height, offsetTop, offsetBottom)
+
+          if (this.affixed != affix) {
+            if (this.unpin != null) this.$element.css('top', '')
+
+            var affixType = 'affix' + (affix ? '-' + affix : '')
+            var e         = eventer.create(affixType + '.affix')
+
+            this.$element.trigger(e)
+
+            if (e.isDefaultPrevented()) return
+
+            this.affixed = affix
+            this.unpin = affix == 'bottom' ? this.getPinnedOffset() : null
+
+            this.$element
+              .removeClass(Affix.RESET)
+              .addClass(affixType)
+              .trigger(affixType.replace('affix', 'affixed') + '.affix')
+          }
+
+          if (affix == 'bottom') {
+            this.$element.offset({
+              top: scrollHeight - height - offsetBottom
+            })
+          }
+        }
+  });
+
+  Affix.RESET    = 'affix affix-top affix-bottom'
+
+  plugins.register(Affix);
+
+  return spy.Affix = Affix;
+});
+
 define('skylark-bootstrap3/bs3',[
   "skylark-langx/skylark",
   "skylark-langx/langx",
@@ -16094,15 +16711,10 @@ define('skylark-bootstrap3/bs3',[
 });
 
 define('skylark-bootstrap3/affix',[
-  "skylark-langx/langx",
-  "skylark-domx-browser",
-  "skylark-domx-eventer",
-  "skylark-domx-noder",
-  "skylark-domx-geom",
-  "skylark-domx-query",
   "skylark-domx-plugins",
+  "skylark-domx-spy/Affix",
   "./bs3"
-],function(langx,browser,eventer,noder,geom,$,plugins,bs3){
+],function(plugins,_Affix,bs3){
 
 
 /* ========================================================================
@@ -16118,112 +16730,14 @@ define('skylark-bootstrap3/affix',[
   // AFFIX CLASS DEFINITION
   // ======================
 
-  var Affix = bs3.Affix = plugins.Plugin.inherit({
+  var Affix = bs3.Affix = _Affix.inherit({
         klassName: "Affix",
 
-        pluginName : "bs3.affix",
-
-        _construct : function(element,options) {
-          this.options = langx.mixin({}, Affix.DEFAULTS, options)
-
-          this.$target = $(this.options.target)
-            .on('scroll.bs.affix.data-api', langx.proxy(this.checkPosition, this))
-            .on('click.bs.affix.data-api',  langx.proxy(this.checkPositionWithEventLoop, this))
-
-          this.$element     = $(element)
-          this.affixed      = null;
-          this.unpin        = null;
-          this.pinnedOffset = null;
-
-          this.checkPosition();
-        },
-
-        getState : function (scrollHeight, height, offsetTop, offsetBottom) {
-          var scrollTop    = this.$target.scrollTop()
-          var position     = this.$element.offset()
-          var targetHeight = this.$target.height()
-
-          if (offsetTop != null && this.affixed == 'top') return scrollTop < offsetTop ? 'top' : false
-
-          if (this.affixed == 'bottom') {
-            if (offsetTop != null) return (scrollTop + this.unpin <= position.top) ? false : 'bottom'
-            return (scrollTop + targetHeight <= scrollHeight - offsetBottom) ? false : 'bottom'
-          }
-
-          var initializing   = this.affixed == null
-          var colliderTop    = initializing ? scrollTop : position.top
-          var colliderHeight = initializing ? targetHeight : height
-
-          if (offsetTop != null && scrollTop <= offsetTop) return 'top'
-          if (offsetBottom != null && (colliderTop + colliderHeight >= scrollHeight - offsetBottom)) return 'bottom'
-
-          return false
-        },
-
-        getPinnedOffset : function () {
-          if (this.pinnedOffset) return this.pinnedOffset
-          this.$element.removeClass(Affix.RESET).addClass('affix')
-          var scrollTop = this.$target.scrollTop()
-          var position  = this.$element.offset()
-          return (this.pinnedOffset = position.top - scrollTop)
-        },
-
-        checkPositionWithEventLoop : function () {
-          setTimeout(langx.proxy(this.checkPosition, this), 1)
-        },
-
-        checkPosition : function () {
-          if (!this.$element.is(':visible')) return
-
-          var height       = this.$element.height()
-          var offset       = this.options.offset
-          var offsetTop    = offset.top
-          var offsetBottom = offset.bottom
-          var scrollHeight = Math.max($(document).height(), $(document.body).height())
-
-          if (typeof offset != 'object')         offsetBottom = offsetTop = offset
-          if (typeof offsetTop == 'function')    offsetTop    = offset.top(this.$element)
-          if (typeof offsetBottom == 'function') offsetBottom = offset.bottom(this.$element)
-
-          var affix = this.getState(scrollHeight, height, offsetTop, offsetBottom)
-
-          if (this.affixed != affix) {
-            if (this.unpin != null) this.$element.css('top', '')
-
-            var affixType = 'affix' + (affix ? '-' + affix : '')
-            var e         = eventer.create(affixType + '.bs.affix')
-
-            this.$element.trigger(e)
-
-            if (e.isDefaultPrevented()) return
-
-            this.affixed = affix
-            this.unpin = affix == 'bottom' ? this.getPinnedOffset() : null
-
-            this.$element
-              .removeClass(Affix.RESET)
-              .addClass(affixType)
-              .trigger(affixType.replace('affix', 'affixed') + '.bs.affix')
-          }
-
-          if (affix == 'bottom') {
-            this.$element.offset({
-              top: scrollHeight - height - offsetBottom
-            })
-          }
-        }
+        pluginName : "bs3.affix"
   });
 
 
   Affix.VERSION  = '3.3.7'
-
-  Affix.RESET    = 'affix affix-top affix-bottom'
-
-  Affix.DEFAULTS = {
-    offset: 0,
-    target: window
-  }
-
 
   /*
   // AFFIX PLUGIN DEFINITION
@@ -16853,6 +17367,262 @@ define('skylark-bootstrap3/carousel',[
     return Carousel;
 
 });
+define('skylark-domx-panels/panels',[
+  "skylark-langx/skylark",
+  "skylark-langx/langx",
+  "skylark-domx-browser",
+  "skylark-domx-eventer",
+  "skylark-domx-noder",
+  "skylark-domx-geom",
+  "skylark-domx-query"
+],function(skylark,langx,browser,eventer,noder,geom,$){
+	var panels = {};
+
+	var CONST = {
+		BACKSPACE_KEYCODE: 8,
+		COMMA_KEYCODE: 188, // `,` & `<`
+		DELETE_KEYCODE: 46,
+		DOWN_ARROW_KEYCODE: 40,
+		ENTER_KEYCODE: 13,
+		TAB_KEYCODE: 9,
+		UP_ARROW_KEYCODE: 38
+	};
+
+	var isShiftHeld = function isShiftHeld (e) { return e.shiftKey === true; };
+
+	var isKey = function isKey (keyCode) {
+		return function compareKeycodes (e) {
+			return e.keyCode === keyCode;
+		};
+	};
+
+	var isBackspaceKey = isKey(CONST.BACKSPACE_KEYCODE);
+	var isDeleteKey = isKey(CONST.DELETE_KEYCODE);
+	var isTabKey = isKey(CONST.TAB_KEYCODE);
+	var isUpArrow = isKey(CONST.UP_ARROW_KEYCODE);
+	var isDownArrow = isKey(CONST.DOWN_ARROW_KEYCODE);
+
+	var ENCODED_REGEX = /&[^\s]*;/;
+	/*
+	 * to prevent double encoding decodes content in loop until content is encoding free
+	 */
+	var cleanInput = function cleanInput (questionableMarkup) {
+		// check for encoding and decode
+		while (ENCODED_REGEX.test(questionableMarkup)) {
+			questionableMarkup = $('<i>').html(questionableMarkup).text();
+		}
+
+		// string completely decoded now encode it
+		return $('<i>').text(questionableMarkup).html();
+	};
+
+	langx.mixin(panels, {
+		CONST: CONST,
+		cleanInput: cleanInput,
+		isBackspaceKey: isBackspaceKey,
+		isDeleteKey: isDeleteKey,
+		isShiftHeld: isShiftHeld,
+		isTabKey: isTabKey,
+		isUpArrow: isUpArrow,
+		isDownArrow: isDownArrow
+	});
+
+	return skylark.attach("domx.panels",panels);
+
+});
+
+define('skylark-domx-panels/Collapse',[
+    "skylark-langx/langx",
+    "skylark-domx-browser",
+    "skylark-domx-eventer",
+    "skylark-domx-query",
+    "skylark-domx-plugins",
+    "./panels"
+], function(langx, browser, eventer,  $, plugins, panels) {
+
+
+  'use strict';
+
+  // COLLAPSE PUBLIC CLASS DEFINITION
+  // ================================
+
+  var Collapse =  plugins.Plugin.inherit({
+    klassName: "Collapse",
+
+    pluginName : "domx.collapse",
+
+    options : {
+      toggle: true
+    },
+
+    _construct : function(elm,options) {
+      ////options = langx.mixin({}, Collapse.DEFAULTS, $(element).data(), options)
+      this.overrided(elm,options);
+      this.$element      = this.$();
+      //this.$trigger      = $('[data-toggle="collapse"][href="#' + elm.id + '"],' +
+      //                     '[data-toggle="collapse"][data-target="#' + elm.id + '"]')
+      this.transitioning = null
+
+      //if (this.options.parent) {
+      //  this.$parent = this.getParent()
+      //} else {
+      //  this.addAriaAndCollapsedClass(this.$element, this.$trigger)
+      //}
+
+      if (this.options.toggle) {
+        this.toggle();
+      }
+    },
+
+    dimension : function () {
+      var hasWidth = this.$element.hasClass('width');
+      return hasWidth ? 'width' : 'height';
+    },
+
+    show : function () {
+      if (this.transitioning || this.$element.hasClass('in')) {
+        return;
+      }
+
+      //var activesData;
+      //var actives = this.$parent && this.$parent.children('.panel').children('.in, .collapsing')
+
+      //if (actives && actives.length) {
+      //  activesData = actives.data('collapse')
+      //  if (activesData && activesData.transitioning) return
+      //}
+
+      var startEvent = eventer.create('show.collapse');
+      this.$element.trigger(startEvent)
+      if (startEvent.isDefaultPrevented()) return
+
+      //if (actives && actives.length) {
+      //  //Plugin.call(actives, 'hide')
+      //  actives.plugin("domx.collapse").hide();
+      //  activesData || actives.data('collapse', null)
+      //}
+
+      var dimension = this.dimension();
+
+      this.$element
+        .removeClass('collapse')
+        .addClass('collapsing')[dimension](0)
+        .attr('aria-expanded', true)
+
+      //this.$trigger
+      //  .removeClass('collapsed')
+      //  .attr('aria-expanded', true)
+
+      this.transitioning = 1
+
+      var complete = function () {
+        this.$element
+          .removeClass('collapsing')
+          .addClass('collapse in')[dimension]('')
+        this.transitioning = 0
+        this.$element
+          .trigger('shown.collapse')
+      }
+
+      if (!browser.support.transition) {
+        return complete.call(this);
+      }
+
+      var scrollSize = langx.camelCase(['scroll', dimension].join('-'));
+
+      this.$element
+        .one('transitionEnd', langx.proxy(complete, this))
+        .emulateTransitionEnd(Collapse.TRANSITION_DURATION)[dimension](this.$element[0][scrollSize]);
+    },
+
+    hide : function () {
+      if (this.transitioning || !this.$element.hasClass('in')) {
+        return ;
+      }
+
+      var startEvent = eventer.create('hide.collapse');
+      this.$element.trigger(startEvent);
+      if (startEvent.isDefaultPrevented()) {
+        return ;
+      } 
+
+      var dimension = this.dimension();
+
+      this.$element[dimension](this.$element[dimension]())[0].offsetHeight;
+
+      this.$element
+        .addClass('collapsing')
+        .removeClass('collapse in')
+        .attr('aria-expanded', false);
+
+      //this.$trigger
+      //  .addClass('collapsed')
+      //  .attr('aria-expanded', false);
+
+      this.transitioning = 1;
+
+      var complete = function () {
+        this.transitioning = 0;
+        this.$element
+          .removeClass('collapsing')
+          .addClass('collapse')
+          .trigger('hidden.collapse');
+      }
+
+      if (!browser.support.transition) {
+        return complete.call(this);
+      }
+
+      this.$element
+        [dimension](0)
+        .one('transitionEnd', langx.proxy(complete, this))
+        .emulateTransitionEnd(Collapse.TRANSITION_DURATION)
+    },
+
+    toggle : function () {
+      this[this.$element.hasClass('in') ? 'hide' : 'show']();
+    }
+
+    /*
+    getParent : function () {
+      return $(this.options.parent)
+        .find('[data-toggle="collapse"][data-parent="' + this.options.parent + '"]')
+        .each(langx.proxy(function (i, element) {
+          var $element = $(element)
+          this.addAriaAndCollapsedClass(getTargetFromTrigger($element), $element)
+        }, this))
+        .end()
+    },
+
+    addAriaAndCollapsedClass : function ($element, $trigger) {
+      var isOpen = $element.hasClass('in');
+
+      $element.attr('aria-expanded', isOpen);
+      $trigger
+        .toggleClass('collapsed', !isOpen)
+        .attr('aria-expanded', isOpen);
+    }
+    */
+  });
+
+  Collapse.TRANSITION_DURATION = 350;
+
+  /*
+  function getTargetFromTrigger($trigger) {
+    var href
+    var target = $trigger.attr('data-target')
+      || (href = $trigger.attr('href')) && href.replace(/.*(?=#[^\s]+$)/, '') // strip for ie7
+
+    return $(target)
+  }
+  */
+
+  plugins.register(Collapse);
+
+  return Collapse;
+
+});
+
 define('skylark-bootstrap3/collapse',[
     "skylark-langx/langx",
     "skylark-domx-browser",
@@ -16861,9 +17631,10 @@ define('skylark-bootstrap3/collapse',[
     "skylark-domx-geom",
     "skylark-domx-query",
     "skylark-domx-plugins",
-    "./bs3",
+    "skylark-domx-panels/Collapse",
+   "./bs3",
     "./transition"
-], function(langx, browser, eventer, noder, geom, $, plugins, bs3) {
+], function(langx, browser, eventer, noder, geom, $, plugins,_Collapse, bs3) {
 
 
 /* ========================================================================
@@ -16881,38 +17652,34 @@ define('skylark-bootstrap3/collapse',[
   // COLLAPSE PUBLIC CLASS DEFINITION
   // ================================
 
-  var Collapse = bs3.Collapse = plugins.Plugin.inherit({
+  var Collapse = bs3.Collapse = _Collapse.inherit({
     klassName: "Collapse",
 
     pluginName : "bs3.collapse",
 
     _construct : function(element,options) {
-      options = langx.mixin({}, Collapse.DEFAULTS, $(element).data(), options)
-      this.overrided(element,options);
-
-      this.$element      = $(element)
+      options = langx.mixin({}, $(element).data(), options)
       this.$trigger      = $('[data-toggle="collapse"][href="#' + element.id + '"],' +
                              '[data-toggle="collapse"][data-target="#' + element.id + '"]')
-      this.transitioning = null
+      //this.transitioning = null
 
-      if (this.options.parent) {
-        this.$parent = this.getParent()
+      if (options.parent) {
+        this.$parent = this.getParent(options)
       } else {
-        this.addAriaAndCollapsedClass(this.$element, this.$trigger)
+        this.addAriaAndCollapsedClass($(element), this.$trigger)
       }
 
-      if (this.options.toggle) {
-        this.toggle();
-      }
+      this.overrided(element,options);
+      //this.$element      = $(element)
+
+      //if (this.options.toggle) {
+      //  this.toggle();
+      //}
     },
 
-    dimension : function () {
-      var hasWidth = this.$element.hasClass('width')
-      return hasWidth ? 'width' : 'height'
-    },
 
     show : function () {
-      if (this.transitioning || this.$element.hasClass('in')) return
+      //if (this.transitioning || this.$element.hasClass('in')) return
 
       var activesData
       var actives = this.$parent && this.$parent.children('.panel').children('.in, .collapsing')
@@ -16922,9 +17689,9 @@ define('skylark-bootstrap3/collapse',[
         if (activesData && activesData.transitioning) return
       }
 
-      var startEvent = eventer.create('show.bs.collapse')
-      this.$element.trigger(startEvent)
-      if (startEvent.isDefaultPrevented()) return
+      //var startEvent = eventer.create('show.bs.collapse')
+      //this.$element.trigger(startEvent)
+      //if (startEvent.isDefaultPrevented()) return
 
       if (actives && actives.length) {
         //Plugin.call(actives, 'hide')
@@ -16932,82 +17699,83 @@ define('skylark-bootstrap3/collapse',[
         activesData || actives.data('bs.collapse', null)
       }
 
-      var dimension = this.dimension()
+      //var dimension = this.dimension()
 
-      this.$element
-        .removeClass('collapse')
-        .addClass('collapsing')[dimension](0)
-        .attr('aria-expanded', true)
+      //this.$element
+      //  .removeClass('collapse')
+      //  .addClass('collapsing')[dimension](0)
+      //  .attr('aria-expanded', true)
+
+      this.overrided(); //add
 
       this.$trigger
         .removeClass('collapsed')
         .attr('aria-expanded', true)
 
-      this.transitioning = 1
+      //this.transitioning = 1
 
-      var complete = function () {
-        this.$element
-          .removeClass('collapsing')
-          .addClass('collapse in')[dimension]('')
-        this.transitioning = 0
-        this.$element
-          .trigger('shown.bs.collapse')
-      }
+      //var complete = function () {
+      //  this.$element
+      //    .removeClass('collapsing')
+      //    .addClass('collapse in')[dimension]('')
+      //  this.transitioning = 0
+      //  this.$element
+      //    .trigger('shown.bs.collapse')
+      //}
 
-      if (!browser.support.transition) return complete.call(this)
+      //if (!browser.support.transition) return complete.call(this)
 
-      var scrollSize = langx.camelCase(['scroll', dimension].join('-'))
+      //var scrollSize = langx.camelCase(['scroll', dimension].join('-'))
 
-      this.$element
-        .one('transitionEnd', langx.proxy(complete, this))
-        .emulateTransitionEnd(Collapse.TRANSITION_DURATION)[dimension](this.$element[0][scrollSize])
+      //this.$element
+      //  .one('transitionEnd', langx.proxy(complete, this))
+      //  .emulateTransitionEnd(Collapse.TRANSITION_DURATION)[dimension](this.$element[0][scrollSize])
     },
 
     hide : function () {
-      if (this.transitioning || !this.$element.hasClass('in')) return
+      //if (this.transitioning || !this.$element.hasClass('in')) return
 
-      var startEvent = eventer.create('hide.bs.collapse')
-      this.$element.trigger(startEvent)
-      if (startEvent.isDefaultPrevented()) return
+      //var startEvent = eventer.create('hide.bs.collapse')
+      //this.$element.trigger(startEvent)
+      //if (startEvent.isDefaultPrevented()) return
 
-      var dimension = this.dimension()
+      //var dimension = this.dimension()
 
-      this.$element[dimension](this.$element[dimension]())[0].offsetHeight
+      //this.$element[dimension](this.$element[dimension]())[0].offsetHeight
 
-      this.$element
-        .addClass('collapsing')
-        .removeClass('collapse in')
-        .attr('aria-expanded', false)
+      //this.$element
+      //  .addClass('collapsing')
+      //  .removeClass('collapse in')
+      //  .attr('aria-expanded', false)
 
+      this.overrided();
       this.$trigger
         .addClass('collapsed')
         .attr('aria-expanded', false)
 
-      this.transitioning = 1
+      //this.transitioning = 1
 
-      var complete = function () {
-        this.transitioning = 0
-        this.$element
-          .removeClass('collapsing')
-          .addClass('collapse')
-          .trigger('hidden.bs.collapse')
-      }
+      //var complete = function () {
+      //  this.transitioning = 0
+      //  this.$element
+      //    .removeClass('collapsing')
+      //    .addClass('collapse')
+      //    .trigger('hidden.bs.collapse')
+      //}
 
-      if (!browser.support.transition) return complete.call(this)
+      //if (!browser.support.transition) return complete.call(this)
 
-      this.$element
-        [dimension](0)
-        .one('transitionEnd', langx.proxy(complete, this))
-        .emulateTransitionEnd(Collapse.TRANSITION_DURATION)
+      //this.$element
+      //  [dimension](0)
+      //  .one('transitionEnd', langx.proxy(complete, this))
+      //  .emulateTransitionEnd(Collapse.TRANSITION_DURATION)
     },
 
-    toggle : function () {
-      this[this.$element.hasClass('in') ? 'hide' : 'show']()
-    },
 
-    getParent : function () {
-      return $(this.options.parent)
-        .find('[data-toggle="collapse"][data-parent="' + this.options.parent + '"]')
+    getParent : function (options) {
+      options = options || this.options;
+      return $(options.parent)
+        .find('[data-toggle="collapse"][data-parent="' + options.parent + '"]')
         .each(langx.proxy(function (i, element) {
           var $element = $(element)
           this.addAriaAndCollapsedClass(getTargetFromTrigger($element), $element)
@@ -17027,12 +17795,6 @@ define('skylark-bootstrap3/collapse',[
   });
 
   Collapse.VERSION  = '3.3.7'
-
-  Collapse.TRANSITION_DURATION = 350
-
-  Collapse.DEFAULTS = {
-    toggle: true
-  }
 
 
   function getTargetFromTrigger($trigger) {
@@ -17080,7 +17842,104 @@ define('skylark-bootstrap3/collapse',[
 
 });
 
-define('skylark-bootstrap3/dropdown',[
+define('skylark-domx-popups/popups',[
+	"skylark-langx-ns"
+],function(skylark){
+
+	var stack = [];
+
+
+
+    /**
+    * get the offset below/above and left/right element depending on screen position
+    * Thanks https://github.com/jquery/jquery-ui/blob/master/ui/jquery.ui.datepicker.js
+    */
+    function around(ref) {
+        var extraY = 0;
+        var dpSize = geom.size(popup);
+        var dpWidth = dpSize.width;
+        var dpHeight = dpSize.height;
+        var refHeight = geom.height(ref);
+        var doc = ref.ownerDocument;
+        var docElem = doc.documentElement;
+        var viewWidth = docElem.clientWidth + geom.scrollLeft(doc);
+        var viewHeight = docElem.clientHeight + geom.scrollTop(doc);
+        var offset = geom.pagePosition(ref);
+        var offsetLeft = offset.left;
+        var offsetTop = offset.top;
+
+        offsetTop += refHeight;
+
+        offsetLeft -=
+            Math.min(offsetLeft, (offsetLeft + dpWidth > viewWidth && viewWidth > dpWidth) ?
+            Math.abs(offsetLeft + dpWidth - viewWidth) : 0);
+
+        offsetTop -=
+            Math.min(offsetTop, ((offsetTop + dpHeight > viewHeight && viewHeight > dpHeight) ?
+            Math.abs(dpHeight + refHeight - extraY) : extraY));
+
+        return {
+            top: offsetTop,
+            bottom: offset.bottom,
+            left: offsetLeft,
+            right: offset.right,
+            width: offset.width,
+            height: offset.height
+        };
+    }
+
+
+	/*
+	 * Popup the ui elment at the specified position
+	 * @param popup  element to display
+	 * @param options
+	 *  - around {HtmlEleent}
+	 *  - at {x,y}
+	 *  - parent {}
+	 */
+
+	function open(popup,options) {
+		if (options.around) {
+			//A DOM node that should be used as a reference point for placing the pop-up. 
+		}
+
+	}
+
+	/*
+	 * Close specified popup and any popups that it parented.
+	 * If no popup is specified, closes all popups.
+     */
+	function close(popup) {
+		var count = 0;
+
+		if (popup) {
+			for (var i= stack.length-1; i>=0; i--) {
+				if (stack[i].popup == popup) {
+					count = stack.length - i; 
+					break;
+				}
+			}
+		} else {
+			count = stack.length;
+		}
+		for (var i=0; i<count ; i++ ) {
+			var top = stack.pop(),
+				popup1 = top.popup;
+			if (popup1.hide) {
+				popup1.hide();
+			} else {
+
+			}
+
+		} 
+	}
+	return skylark.attach("domx.popups",{
+		around,
+		open,
+		close
+	});
+});
+define('skylark-domx-popups/Dropdown',[
   "skylark-langx/langx",
   "skylark-domx-browser",
   "skylark-domx-eventer",
@@ -17088,16 +17947,9 @@ define('skylark-bootstrap3/dropdown',[
   "skylark-domx-geom",
   "skylark-domx-query",
   "skylark-domx-plugins",
-  "./bs3"
-],function(langx,browser,eventer,noder,geom,$,plugins,bs3){
+  "./popups"
+],function(langx,browser,eventer,noder,geom,$,plugins,popups){
 
-/* ========================================================================
- * Bootstrap: dropdown.js v3.3.7
- * http://getbootstrap.com/javascript/#dropdowns
- * ========================================================================
- * Copyright 2011-2016 Twitter, Inc.
- * Licensed under MIT (https://github.com/twbs/bootstrap/blob/master/LICENSE)
- * ======================================================================== */
   'use strict';
 
   // DROPDOWN CLASS DEFINITION
@@ -17106,24 +17958,35 @@ define('skylark-bootstrap3/dropdown',[
   var backdrop = '.dropdown-backdrop';
   var toggle   = '[data-toggle="dropdown"]';
 
-  var Dropdown = bs3.Dropdown = plugins.Plugin.inherit({
+  var Dropdown = plugins.Plugin.inherit({
     klassName: "Dropdown",
 
-    pluginName : "bs3.dropdown",
+    pluginName : "domx.dropdown",
 
-    _construct : function(element,options) {
-      var $el = this.$element = $(element);
-      $el.on('click.bs.dropdown', this.toggle);
-      $el.on('keydown.bs.dropdown', '[data-toggle="dropdown"],.dropdown-menu',this.keydown);
+    options : {
+      "selectors" : {
+        "toggler" : '[data-toggle="dropdown"],.dropdown-menu'
+      }
+
+    },
+
+    _construct : function(elm,options) {
+      this.overrided(elm,options);
+
+      var $el = this.$element = $(this._elm);
+      $el.on('click.dropdown', this.toggle);
+      $el.on('keydown.dropdown', this.options.selectors.toggler,this.keydown);
     },
 
     toggle : function (e) {
       var $this = $(this)
 
-      if ($this.is('.disabled, :disabled')) return
+      if ($this.is('.disabled, :disabled')) {
+        return;
+      }
 
       var $parent  = getParent($this)
-      var isActive = $parent.hasClass('open')
+      var isActive = $parent.hasClass('open');
 
       clearMenus()
 
@@ -17137,9 +18000,11 @@ define('skylark-bootstrap3/dropdown',[
         }
 
         var relatedTarget = { relatedTarget: this }
-        $parent.trigger(e = eventer.create('show.bs.dropdown', relatedTarget))
+        $parent.trigger(e = eventer.create('show.dropdown', relatedTarget))
 
-        if (e.isDefaultPrevented()) return
+        if (e.isDefaultPrevented()) {
+          return;
+        }
 
         $this
           .trigger('focus')
@@ -17147,21 +18012,25 @@ define('skylark-bootstrap3/dropdown',[
 
         $parent
           .toggleClass('open')
-          .trigger(eventer.create('shown.bs.dropdown', relatedTarget))
+          .trigger(eventer.create('shown.dropdown', relatedTarget))
       }
 
       return false
     },
 
     keydown : function (e) {
-      if (!/(38|40|27|32)/.test(e.which) || /input|textarea/i.test(e.target.tagName)) return
+      if (!/(38|40|27|32)/.test(e.which) || /input|textarea/i.test(e.target.tagName)) {
+        return;
+      }
 
-      var $this = $(this)
+      var $this = $(this);
 
       e.preventDefault()
       e.stopPropagation()
 
-      if ($this.is('.disabled, :disabled')) return
+      if ($this.is('.disabled, :disabled')) {
+        return;
+      }
 
       var $parent  = getParent($this)
       var isActive = $parent.hasClass('open')
@@ -17182,12 +18051,10 @@ define('skylark-bootstrap3/dropdown',[
       if (e.which == 40 && index < $items.length - 1) index++         // down
       if (!~index)                                    index = 0
 
-      $items.eq(index).trigger('focus')
+      $items.eq(index).trigger('focus');
     }
 
   });
-
-  Dropdown.VERSION = '3.3.7'
 
   function getParent($this) {
     var selector = $this.attr('data-target')
@@ -17197,9 +18064,9 @@ define('skylark-bootstrap3/dropdown',[
       selector = selector && /#[A-Za-z]/.test(selector) && selector.replace(/.*(?=#[^\s]*$)/, '') // strip for ie7
     }
 
-    var $parent = selector && $(selector)
+    var $parent = selector && $(selector);
 
-    return $parent && $parent.length ? $parent : $this.parent()
+    return $parent && $parent.length ? $parent : $this.parent();
   }
 
   function clearMenus(e) {
@@ -17214,14 +18081,65 @@ define('skylark-bootstrap3/dropdown',[
 
       if (e && e.type == 'click' && /input|textarea/i.test(e.target.tagName) && noder.contains($parent[0], e.target)) return
 
-      $parent.trigger(e = eventer.create('hide.bs.dropdown', relatedTarget))
+      $parent.trigger(e = eventer.create('hide.dropdown', relatedTarget))
 
       if (e.isDefaultPrevented()) return
 
       $this.attr('aria-expanded', 'false')
-      $parent.removeClass('open').trigger(eventer.create('hidden.bs.dropdown', relatedTarget))
+      $parent.removeClass('open').trigger(eventer.create('hidden.dropdown', relatedTarget))
     })
   }
+
+
+
+  // APPLY TO STANDARD DROPDOWN ELEMENTS
+  // ===================================
+  $(document)
+    .on('click.dropdown.data-api', clearMenus)
+    .on('click.dropdown.data-api', '.dropdown form', function (e) { e.stopPropagation() });
+
+  plugins.register(Dropdown);
+
+  return popups.Dropdown = Dropdown;
+
+});
+
+define('skylark-bootstrap3/dropdown',[
+  "skylark-langx/langx",
+  "skylark-domx-browser",
+  "skylark-domx-eventer",
+  "skylark-domx-noder",
+  "skylark-domx-geom",
+  "skylark-domx-query",
+  "skylark-domx-plugins",
+  "skylark-domx-popups/Dropdown",
+  "./bs3"
+],function(langx,browser,eventer,noder,geom,$,plugins,_Dropdown,bs3){
+
+/* ========================================================================
+ * Bootstrap: dropdown.js v3.3.7
+ * http://getbootstrap.com/javascript/#dropdowns
+ * ========================================================================
+ * Copyright 2011-2016 Twitter, Inc.
+ * Licensed under MIT (https://github.com/twbs/bootstrap/blob/master/LICENSE)
+ * ======================================================================== */
+  'use strict';
+
+  // DROPDOWN CLASS DEFINITION
+  // =========================
+
+  var backdrop = '.dropdown-backdrop';
+  var toggle   = '[data-toggle="dropdown"]';
+
+  var Dropdown = bs3.Dropdown = _Dropdown.inherit({
+    klassName: "Dropdown",
+
+    pluginName : "bs3.dropdown",
+
+
+  });
+
+  Dropdown.VERSION = '3.3.7'
 
 
   /*
@@ -17259,10 +18177,11 @@ define('skylark-bootstrap3/dropdown',[
 
   // APPLY TO STANDARD DROPDOWN ELEMENTS
   // ===================================
+  /*
   $(document)
     .on('click.bs.dropdown.data-api', clearMenus)
     .on('click.bs.dropdown.data-api', '.dropdown form', function (e) { e.stopPropagation() });
-
+  */
   plugins.register(Dropdown,"dropdown");
 
   return Dropdown;
@@ -18301,7 +19220,7 @@ define('skylark-bootstrap3/popover',[
 
 });
 
-define('skylark-bootstrap3/scrollspy',[
+define('skylark-domx-spy/ScrollSpy',[
   "skylark-langx/langx",
   "skylark-domx-browser",
   "skylark-domx-eventer",
@@ -18309,38 +19228,35 @@ define('skylark-bootstrap3/scrollspy',[
   "skylark-domx-geom",
   "skylark-domx-query",
   "skylark-domx-plugins",
-  "./bs3"
-],function(langx,browser,eventer,noder,geom,$,plugins,bs3){
-
-/* ========================================================================
- * Bootstrap: scrollspy.js v3.3.7
- * http://getbootstrap.com/javascript/#scrollspy
- * ========================================================================
- * Copyright 2011-2016 Twitter, Inc.
- * Licensed under MIT (https://github.com/twbs/bootstrap/blob/master/LICENSE)
- * ======================================================================== */
+  "./spy"
+],function(langx,browser,eventer,noder,geom,$,plugins,spy){
 
   'use strict';
 
   // SCROLLSPY CLASS DEFINITION
   // ==========================
 
-  var ScrollSpy = bs3.ScrollSpy = plugins.Plugin.inherit({
+  var ScrollSpy =  plugins.Plugin.inherit({
     klassName: "ScrollSpy",
 
-    pluginName : "bs3.scrollspy",
+    pluginName : "domx.scrollspy",
 
-    _construct : function(element,options) {
+    options: {
+      offset: 10
+    },
+
+    _construct : function(elm,options) {
+      this.overrided(elm,options);
       this.$body          = $(document.body)
-      this.$scrollElement = $(element).is(document.body) ? $(window) : $(element)
-      this.options        = langx.mixin({}, ScrollSpy.DEFAULTS, options)
+      this.$scrollElement = this.$().is(document.body) ? $(window) : this.$();
+      //this.options        = langx.mixin({}, ScrollSpy.DEFAULTS, options)
       this.selector       = (this.options.target || '') + ' .nav li > a'
       this.offsets        = []
       this.targets        = []
       this.activeTarget   = null
       this.scrollHeight   = 0
 
-      this.$scrollElement.on('scroll.bs.scrollspy', langx.proxy(this.process, this))
+      this.$scrollElement.on('scroll.scrollspy', langx.proxy(this.process, this))
       this.refresh()
       this.process()
     },
@@ -18431,7 +19347,7 @@ define('skylark-bootstrap3/scrollspy',[
           .addClass('active')
       }
 
-      active.trigger('activate.bs.scrollspy')
+      active.trigger('activate.scrollspy')
     },
 
     clear : function () {
@@ -18442,11 +19358,41 @@ define('skylark-bootstrap3/scrollspy',[
 
   });
 
-  ScrollSpy.VERSION  = '3.3.7'
+  plugins.register(ScrollSpy);
 
-  ScrollSpy.DEFAULTS = {
-    offset: 10
-  }
+  return spy.ScrollSpy = ScrollSpy;
+
+});
+
+define('skylark-bootstrap3/scrollspy',[
+  "skylark-domx-plugins",
+  "skylark-domx-spy/ScrollSpy",
+  "./bs3"
+],function(plugins,_ScrollSpy,bs3){
+
+
+/* ========================================================================
+ * Bootstrap: scrollspy.js v3.3.7
+ * http://getbootstrap.com/javascript/#scrollspy
+ * ========================================================================
+ * Copyright 2011-2016 Twitter, Inc.
+ * Licensed under MIT (https://github.com/twbs/bootstrap/blob/master/LICENSE)
+ * ======================================================================== */
+
+  'use strict';
+
+  // SCROLLSPY CLASS DEFINITION
+  // ==========================
+
+  var ScrollSpy = bs3.ScrollSpy = _ScrollSpy.inherit({
+    klassName: "ScrollSpy",
+
+    pluginName : "bs3.scrollspy"
+
+
+  });
+
+  ScrollSpy.VERSION  = '3.3.7'
 
   /*
 
@@ -18487,7 +19433,7 @@ define('skylark-bootstrap3/scrollspy',[
 
 });
 
-define('skylark-bootstrap3/tab',[
+define('skylark-domx-panels/Tab',[
   "skylark-langx/langx",
   "skylark-domx-browser",
   "skylark-domx-eventer",
@@ -18495,16 +19441,8 @@ define('skylark-bootstrap3/tab',[
   "skylark-domx-geom",
   "skylark-domx-query",
   "skylark-domx-plugins",
-  "./bs3"
-],function(langx,browser,eventer,noder,geom,$,plugins,bs3){
-
-/* ========================================================================
- * Bootstrap: tab.js v3.3.7
- * http://getbootstrap.com/javascript/#tabs
- * ========================================================================
- * Copyright 2011-2016 Twitter, Inc.
- * Licensed under MIT (https://github.com/twbs/bootstrap/blob/master/LICENSE)
- * ======================================================================== */
+  "./panels"
+],function(langx,browser,eventer,noder,geom,$,plugins,panels){
 
   'use strict';
 
@@ -18512,10 +19450,10 @@ define('skylark-bootstrap3/tab',[
   // ====================
 
 
-  var Tab = bs3.Tab = plugins.Plugin.inherit({
+  var Tab =  plugins.Plugin.inherit({
     klassName: "Tab",
 
-    pluginName : "bs3.tab",
+    pluginName : "domx.tab",
 
     _construct : function(element,options) {
       // jscs:disable requireDollarBeforejQueryAssignment
@@ -18621,9 +19559,42 @@ define('skylark-bootstrap3/tab',[
   });
 
 
-  Tab.VERSION = '3.3.7'
-
   Tab.TRANSITION_DURATION = 150
+
+
+  plugins.register(Tab);
+
+  return panels.Tab = Tab;
+});
+
+define('skylark-bootstrap3/tab',[
+  "skylark-domx-plugins",
+  "skylark-domx-panels/Tab",
+  "./bs3"
+],function(plugins,_Tab,bs3){
+
+/* ========================================================================
+ * Bootstrap: tab.js v3.3.7
+ * http://getbootstrap.com/javascript/#tabs
+ * ========================================================================
+ * Copyright 2011-2016 Twitter, Inc.
+ * Licensed under MIT (https://github.com/twbs/bootstrap/blob/master/LICENSE)
+ * ======================================================================== */
+
+  'use strict';
+
+  // TAB CLASS DEFINITION
+  // ====================
+
+
+  var Tab = bs3.Tab = _Tab.inherit({
+    klassName: "Tab",
+
+    pluginName : "bs3.tab"
+  });
+
+
+  Tab.VERSION = '3.3.7'
 
   /*
   // TAB PLUGIN DEFINITION
@@ -19545,4386 +20516,10 @@ define('skylark-bootstrap3/main',[
 });
 define('skylark-bootstrap3', ['skylark-bootstrap3/main'], function (main) { return main; });
 
-define('skylark-widgets-swt/swt',[
-  "skylark-langx/skylark",
-  "skylark-langx/langx",
-  "skylark-domx-browser",
-  "skylark-domx-eventer",
-  "skylark-domx-noder",
-  "skylark-domx-geom",
-  "skylark-domx-query"
-],function(skylark,langx,browser,eventer,noder,geom,$){
-	var swt = {};
-
-	var CONST = {
-		BACKSPACE_KEYCODE: 8,
-		COMMA_KEYCODE: 188, // `,` & `<`
-		DELETE_KEYCODE: 46,
-		DOWN_ARROW_KEYCODE: 40,
-		ENTER_KEYCODE: 13,
-		TAB_KEYCODE: 9,
-		UP_ARROW_KEYCODE: 38
-	};
-
-	var isShiftHeld = function isShiftHeld (e) { return e.shiftKey === true; };
-
-	var isKey = function isKey (keyCode) {
-		return function compareKeycodes (e) {
-			return e.keyCode === keyCode;
-		};
-	};
-
-	var isBackspaceKey = isKey(CONST.BACKSPACE_KEYCODE);
-	var isDeleteKey = isKey(CONST.DELETE_KEYCODE);
-	var isTabKey = isKey(CONST.TAB_KEYCODE);
-	var isUpArrow = isKey(CONST.UP_ARROW_KEYCODE);
-	var isDownArrow = isKey(CONST.DOWN_ARROW_KEYCODE);
-
-	var ENCODED_REGEX = /&[^\s]*;/;
-	/*
-	 * to prevent double encoding decodes content in loop until content is encoding free
-	 */
-	var cleanInput = function cleanInput (questionableMarkup) {
-		// check for encoding and decode
-		while (ENCODED_REGEX.test(questionableMarkup)) {
-			questionableMarkup = $('<i>').html(questionableMarkup).text();
-		}
-
-		// string completely decoded now encode it
-		return $('<i>').text(questionableMarkup).html();
-	};
-
-	langx.mixin(swt, {
-		CONST: CONST,
-		cleanInput: cleanInput,
-		isBackspaceKey: isBackspaceKey,
-		isDeleteKey: isDeleteKey,
-		isShiftHeld: isShiftHeld,
-		isTabKey: isTabKey,
-		isUpArrow: isUpArrow,
-		isDownArrow: isDownArrow
-	});
-
-	return skylark.attach("widgets.swt",swt);
-
-});
-
-define('skylark-widgets-swt/Panel',[
-  "skylark-langx/langx",
-  "skylark-domx-browser",
-  "skylark-domx-eventer",
-  "skylark-domx-noder",
-  "skylark-domx-geom",
-  "skylark-domx-query",
-  "skylark-bootstrap3/collapse",
-  "./swt",
-  "./Widget"
-],function(langx,browser,eventer,noder,geom,$,collapse,swt,Widget){
-
-  var Panel = Widget.inherit({
-    klassName : "Panel",
-
-    pluginName : "lark.panel",
-
-    options : {
-      toggler : {
-        selector : ".panel-heading [data-toggle=\"collapse\"]"
-      },
-
-      body : {
-        selector : ".panel-collapse"
-      }
-    },
-
-    _init : function() {
-      var self = this;
-      this.$toggle = this._velm.find(this.options.toggler.selector);
-      this.$body = this._velm.find(this.options.body.selector);
-      this.$toggle.on('click.lark',function (e) {
-        var $this   = $(this);
-        var collpasePlugin    = self.$body.collapse('instance');
-        if (collpasePlugin) {
-          collpasePlugin.toggle();
-        } else {
-          self.$body.collapse($this.data());
-        }
-      });
-
-    },
-
-    expand : function() {
-      // expand this panel
-      this.$body.collapse("show");
-    },
-
-    collapse : function() {
-      // collapse this panel
-      this.$body.collapse("hide");
-    },
-
-    toogle : function() {
-      // toogle this panel
-     this.body.collapse("toogle");
-    },
-
-    full : function() {
-
-    },
-
-    unfull : function() {
-
-    },
-
-    toogleFull : function() {
-
-    },
-    
-    close: function () {
-      var panel_dom = this.dom(id);
-      this.minimize(id, true).promise().then(function () {
-        panel_dom.fadeOut();
-      });
-    }
-
-
-  });
-
-
-  return Panel;
-
-});
-define('skylark-widgets-swt/Accordion',[
-  "skylark-langx/langx",
-  "skylark-domx-browser",
-  "skylark-domx-eventer",
-  "skylark-domx-noder",
-  "skylark-domx-geom",
-  "skylark-domx-query",
-  "skylark-bootstrap3/collapse",
-  "./swt",
-  "./Widget",
-  "./Panel"
-],function(langx,browser,eventer,noder,geom,$,collapse,swt,Widget, Panel){
-
-  var Accordion = Widget.inherit({
-    klassName : "Accordion",
-
-    pluginName : "lark.accordion",
-
-    options : {
-      panel: {
-        selector : "> .panel",
-        template : null,
-      }
-    },
-
-    _init : function() {
-      var panels = [];
-      this._velm.$(this.options.panel.selector).forEach(function(panelEl){
-        var panel = new Accordion.Panel(panelEl,{
-
-        });
-        panels.push(panel);
-      });
-      this._panels = panels;
-    },
-
-    _post : function() {
-      // handle internal events
-    },
-
-    _refresh : function(updates) {
-    },
-
-    panels : {
-      get : function() {
-
-      }
-    },
-
-
-    addPanel : function() {
-
-    },
-
-    /**
-     * Removes a accordion pane.
-     *
-     * @method remove
-     * @return {Accordion} The current widget.
-     */
-    remove : function() {
-
-    },
-
-    /**
-     * Expands a accordion pane.
-     *
-     * @method remove
-     * @return {Accordion} The current widget.
-     */
-    expand : function() {
-      // expand a panel
-
-    },
-
-    /**
-     * Expands all accordion panes.
-     *
-     * @method expandAll
-     * @return {Accordion} The current widget.
-     */
-    expandAll : function() {
-      // expand a panel
-
-    },
-
-    /**
-     * Collapse a accordion pane.
-     *
-     * @method collapse
-     * @return {Accordion} The current widget.
-     */
-    collapse : function() {
-
-    },
-
-    /**
-     * Collapses all accordion pane.
-     *
-     * @method collapseAll
-     * @return {Accordion} The current widget.
-     */
-    collapseAll : function() {
-
-    }
-  });
-
-  Accordion.Panel = Panel.inherit({
-    klassName : "AccordionPanel",
-
-    _init : function() {
-      //this._velm.collapse();
-      this.overrided();
-    },
-
-    expand : function() {
-      // expand this panel
-      $(this._elm).collapse("show");
-    },
-
-    collapse : function() {
-      // collapse this panel
-      $(this._elm).collapse("hide");
-    },
-
-    toogle : function() {
-      // toogle this panel
-     $(this._elm).collapse("toogle");
-    },
-
-    remove : function() {
-      this.overided();
-    }
-  });
-
-  return swt.Accordion = Accordion;
-});
-
-define('skylark-widgets-swt/Button',[
-  "skylark-langx/langx",
-  "skylark-domx-query",
-  "./swt",
-  "./Widget"
-],function(langx,$,swt,Widget){
-
-	class Button extends Widget {
-		get klassName() {
-      return "Button";
-    } 
-
-    get pluginName(){
-      return "lark.button";
-    } 
-
-		get options () {
-      return {
-        btnSize : "lg",
-        btnType : "default",
-        leftIcon : null,
-        rightIcon : null,
-        topIcon : null, // TODO
-        bottomIcon : null //TODO        
-      }
-		}
-
-    get state() {
-      return {
-        "text" : String
-      }
-    }
-
-    _parse (elm,options) {
-      var $el = $(elm),
-          options = langx.mixin({},options);
-
-      if (!options.btnType) {
-        if ($el.hasClass("btn-link")) {
-          options.btnType = "link";
-        } else if ($el.hasClass("btn-default")) {
-          options.btnType = "default";
-        } else if ($el.hasClass("btn-primary")) {
-          options.btnType = "primary";
-        } else if ($el.hasClass("btn-info")) {
-          options.btnType = "info";
-        } else if ($el.hasClass("btn-success")) {
-          options.btnType = "success";
-        } else if ($el.hasClass("btn-warning")) {
-          options.btnType = "warning";
-        } else if ($el.hasClass("btn-danger")) {
-          options.btnType = "danger";
-        }        
-      }
-
-      if (!options.btnSize) {
-        if ($el.hasClass("btn-xs")) {
-          options.btnSize = "xs";
-        } else if ($el.hasClass("btn-sm")) {
-          options.btnSize = "sm";
-        } else if ($el.hasClass("btn-lg")) {
-          options.btnSize = "lg";
-        }        
-      }
-
-      if (!options.href) {
-        options.href = $el.attr('href');
-
-        options.target = $el.attr('target');
-      }
-
-      if (!options.text) {
-        options.text = $el.find('.text').text();
-      }
-
-      if (!options.leftIcon) {
-        var $fa_icon_left = $el.find('.fa-icon-left');
-        if ($fa_icon_left.length > 0) {
-          $fa_icon_left.removeClass('fa-icon-left').removeClass('fa');
-          options.leftIcon = $fa_icon_left.attr('class');
-          $fa_icon_left.addClass('fa-icon-left').addClass('fa');
-        }
-      }
-
-      if (!options.rightIcon) {
-        var $fa_icon_right = $el.find('.fa-icon-right');
-
-        if ($fa_icon_right.length > 0) {
-          $fa_icon_right.removeClass('fa-icon-right').removeClass('fa');
-          options.rightIcon = $fa_icon_right.attr('class');
-          $fa_icon_right.addClass('fa-icon-right').addClass('fa');
-        }        
-      }
-    }
-
-    _refresh (updates) {
-      //this.overrided(updates);
-      super._refresh(updates);
-
-      var velm = this._velm;
-
-      if (updates.btnType) {
-          velm.removeClass('btn-link btn-default btn-primary btn-info btn-success btn-warning btn-danger').addClass("btn-" + updates.btnType.value);
-      }
-
-      if (updates.btnSize) {
-        velm.removeClass('btn-xs btn-sm btn-lg').addClass("btn-" + updates.btnSize.value);
-      }
-
-      if (updates.text) {
-        velm.$('.text').text(updates.text.value);
-      }
-
-      if (updates.left) {
-          velm.$('.fa-icon-left').remove();
-          velm.prepend('<i style="word-spacing: -1em;" class="fa fa-icon-left fa-' + updates.iconleft.value + '">&nbsp;</i>\n');
-      }
-
-      if (updates.iconright) {
-          velm.$('.fa-icon-right').remove();
-          if (updates.iconright.value) {
-              velm.append('<i style="word-spacing: -1em;" class="fa fa-icon-right fa-' + updates.iconright.value + '">&nbsp;</i>\n');
-          }
-      }
-    }
-  };
-
-  Widget.register(Button);
-//  class Buttonx extends Button {
-//
-//  }
-
-//  Widget.register(Buttonx,"lark.button");
-  return swt.Button = Button;
-
-});
-
-
-
-
-define('skylark-widgets-swt/Carousel',[
-    "skylark-langx/langx",
-    "skylark-domx-browser",
-    "skylark-domx-eventer",
-    "skylark-domx-noder",
-    "skylark-domx-geom",
-    "skylark-domx-query",
-    "./swt",
-    "./Widget",
-    "skylark-bootstrap3/carousel"
-], function(langx, browser, eventer, noder, geom,  $, swt, Widget) {
-
-    var Carousel =  Widget.inherit({
-        klassName : "Carousel",
-        pluginName : "lark.carousel",
-
-        options : {
-
-            items : [],
-
-            indicatorTemplate : "",
-            slideTemplate : "",
-
-            templates : {
-              container : "<div class=\"carousel slide\" data-ride=\"carousel\">" +
-                          "/div",
-              indicators : {
-                  container : "<ol class=\"carousel-indicators\">" +
-                              "</ol>",
-                  item :  "<li></li>"
-              },
-
-              slides : {
-                  container : "<div class=\"carousel-inner\">" +
-                              "/div",
-                  item :  "<div class=\"item carousel-item\">" +
-                            "<img alt=\"First slide\"  src=\"{{url}}\">" +
-                          "</div>"
-              }
-            }
-        },
-
-        _init : function() {
-          this._bs_carousel = this._velm.carousel(this.options);
-          var self = this;          
-          this._velm.on("click.lark", "[data-slide],[data-slide-to]", function(e) {
-            var $this = $(this)
-            var slideIndex = $this.attr('data-slide-to');
-            if (slideIndex) {
-                self.to(slideIndex);
-            } else {
-              var slideAction = $this.attr('data-slide');
-              if (slideAction == "prev") {
-                self.prev();
-              } else {
-                self.next();
-              }
-            }
-
-            e.preventDefault();
-
-        });
-        },
-
-        to : function(pos) {
-          return this._bs_carousel.to(pos);
-        },
-
-        pause : function(e) {
-          this._bs_carousel.pause(e);
-          return this;
-        },
-
-        cycle : function(e) {
-          return this._bs_carousel.cycle(e);
-        },
-
-        next : function() {
-          return this._bs_carousel.next();
-        },
-
-        prev : function() {
-          return this._bs_carousel.prev();
-        },
-
-        add : function() {
-            
-        },
-
-        createIndicator: function (obj) {
-          var gallery = this.gallery,
-            indicator = this.indicatorPrototype.cloneNode(false)
-          var title = gallery.getItemTitle(obj)
-          var thumbnailProperty = this.options.thumbnailProperty
-          var thumbnailUrl
-          var thumbnail
-          if (this.options.thumbnailIndicators) {
-            if (thumbnailProperty) {
-              thumbnailUrl = Gallery.getItemProperty(obj, thumbnailProperty)
-            }
-            if (thumbnailUrl === undefined) {
-              thumbnail = obj.getElementsByTagName && $(obj).find('img')[0]
-              if (thumbnail) {
-                thumbnailUrl = thumbnail.src
-              }
-            }
-            if (thumbnailUrl) {
-              indicator.style.backgroundImage = 'url("' + thumbnailUrl + '")'
-            }
-          }
-          if (title) {
-            indicator.title = title;
-          }
-          return indicator;
-      },
-
-      addIndicator: function (index) {
-        if (this.indicatorContainer.length) {
-          var indicator = this.createIndicator(this.list[index])
-          indicator.setAttribute('data-slide-to', index)
-          this.indicatorContainer[0].appendChild(indicator)
-          this.indicators.push(indicator)
-        }
-      },
-
-      setActiveIndicator: function (index) {
-        if (this.indicators) {
-          if (this.activeIndicator) {
-            this.activeIndicator.removeClass(this.options.activeIndicatorClass)
-          }
-          this.activeIndicator = $(this.indicators[index])
-          this.activeIndicator.addClass(this.options.activeIndicatorClass)
-        }
-      },
-
-      initSlides: function (reload) {
-        if (!reload) {
-          this.indicatorContainer = this.container.find(
-            this.options.indicatorContainer
-          )
-          if (this.indicatorContainer.length) {
-            this.indicatorPrototype = document.createElement('li')
-            this.indicators = this.indicatorContainer[0].children
-          }
-        }
-        this.overrided(reload);
-      },
-
-      addSlide: function (index) {
-        this.overrided(index);
-        this.addIndicator(index)
-      },
-
-      resetSlides: function () {
-        this.overrided();
-        this.indicatorContainer.empty();
-        this.indicators = [];
-      },
-
-    });
-
-    return swt.Carousel = Carousel;
-
-});
-define('skylark-widgets-swt/_Toggler',[
-  "skylark-langx/langx",
-  "skylark-domx-browser",
-  "skylark-domx-eventer",
-  "skylark-domx-noder",
-  "skylark-domx-geom",
-  "skylark-domx-query",
-  "./swt",
-  "./Widget"
-],function(langx,browser,eventer,noder,geom,$,swt,Widget){
-
-  var _Toggler = swt._Toggler = Widget.inherit({
-    klassName: "_Toggler",
-
-    toggle: function () {
-      var checked = this.isChecked();
-
-      if (checked) {
-        this.uncheck();
-      } else {
-        this.check();
-      }
-    },
-
-    check: function  () {
-      this.state.set('checked',true);
-      return this;
-    },
-
-    uncheck: function () {
-      this.state.set('checked',false);
-      return this;
-    },
-
-    /**
-     * Getter function for the checked state.
-     *
-     * @method isChecked
-     * @return {Boolean} True/false 
-     */
-    isChecked: function () {
-      return this.state.get('checked');
-    }
-  });
-
-	return _Toggler;
-});
-
-define('skylark-widgets-swt/CheckBox',[
-  "skylark-langx/langx",
-  "skylark-domx-browser",
-  "skylark-domx-eventer",
-  "skylark-domx-noder",
-  "skylark-domx-geom",
-  "skylark-domx-query",
-  "./swt",
-  "./_Toggler"
-],function(langx,browser,eventer,noder,geom,$,swt,_Toggler){
-
-  var CheckBox =  _Toggler.inherit({
-    klassName: "CheckBox",
-
-    pluginName : "lark.checkbox",
-
-    options : {
-      selectors : {
-        chk : "input[type=checkbox]",
-        lbl : "checkbox-label"
-      },
-      template : undefined,
-      checked : undefined,
-      label : undefined,
-      value : undefined
-    },
-
-    /*
-     *@override
-     */
-    _parse : function(elm,options) {
-      options = this.overrided(elm,options);
-      var $el = $(elm),
-          chkSelector = options.selectors && options.selectors.chk,
-          lblSelector = options.selectors && options.selectors.lbl;
-
-      if (!chkSelector) {
-        chkSelector = this.options.selectors.chk;
-      }
-      if (!lblSelector) {
-        lblSelector = this.options.selectors.lbl;
-      }
-
-      var $chk = $el.find(chkSelector),
-          $lbl = $el.find(lblSelector);
-
-      if (options.checked == undefined) {
-        options.checked = $chk.prop('checked')
-      } else {
-        $chk.prop('checked',options.checked);
-      }
-
-      if (options.disabled == undefined) {
-        options.disabled = $chk.prop('disabled')
-      } else {
-        $chk.prop('disabled',options.disabled);
-      }
-
-      return options;
-    },
-
-    /*
-     *@override
-     */
-    _create : function() {
-      //TODO
-    },
-
-    /*
-     *@override
-     */
-    _init : function() {
-      var elm = this._elm;
-
-      // cache elements
-      this.$lbl = this._velm.$(this.options.selectors.lbl);
-      this.$chk = this._velm.$(this.options.selectors.chk);
-    },
-
-
-    /*
-     *@override
-     */
-    _startup : function() {
-      // handle internal events
-      var self = this;
-      this.$chk.on('change', function(evt) {
-        //var $chk = $(evt.target);
-        var checked = self.$chk.prop('checked');
-        self.state.set("checked",checked);
-      });
-    },
-
-    /*
-     *@override
-     */
-    _refresh : function(updates) {
-
-        function setCheckedState (checked) {
-          var $chk = self.$chk;
-          var $lbl = self.$label;
-          var $containerToggle = self.$toggleContainer;
-
-          if (checked) {
-            $chk.prop('checked', true);
-            $lbl.addClass('checked');
-            $containerToggle.removeClass('hide hidden');
-          } else {
-            $chk.prop('checked', false);
-            $lbl.removeClass('checked');
-            $containerToggle.addClass('hidden');
-          }
-        }
-
-        function setDisabledState (disabled) {
-          var $chk = self.$chk;
-          var $lbl = self.$label;
-
-          if (disabled) {
-            $chk.prop('disabled', true);
-            $lbl.addClass('disabled');
-          } else {
-            $chk.prop('disabled', false);
-            $lbl.removeClass('disabled');
-          }
-        }
-
-        // update visual with attribute values from control
-        this.overrided(changed);
-        var self  = this;
-
-        if (updates["checked"]) {
-          setCheckedState(updates["checked"].value);
-        }
-        if (updates["disabled"]) {
-          setDisabledState(updates["disabled"].value);
-        }
-    }
-  });
-
-	return swt.CheckBox = CheckBox;
-});
-
-define('skylark-widgets-swt/ComboBox',[
-  "skylark-langx/langx",
-  "skylark-domx-browser",
-  "skylark-domx-eventer",
-  "skylark-domx-noder",
-  "skylark-domx-geom",
-  "skylark-domx-query",
-  "./swt",
-  "./Widget",
-  "skylark-bootstrap3/dropdown"
-],function(langx,browser,eventer,noder,geom,$,swt,Widget){
-
-
-
-	// COMBOBOX CONSTRUCTOR AND PROTOTYPE
-
-	var ComboBox = Widget.inherit({
-		klassName: "ComboBox",
-
-		pluginName : "lark.combobox",
-
-		widgetClass : "lark-combobox",
-
-		options : {
-
-			autoResizeMenu: true,
-			filterOnKeypress: false,
-			showOptionsOnKeypress: false,
-			filter: function filter (list, predicate, self) {
-				var visible = 0;
-				self.$dropMenu.find('.empty-indicator').remove();
-
-				list.each(function (i) {
-					var $li = $(this);
-					var text = $(this).text().trim();
-
-					$li.removeClass();
-
-					if (text === predicate) {
-						$li.addClass('text-success');
-						visible++;
-					} else if (text.substr(0, predicate.length) === predicate) {
-						$li.addClass('text-info');
-						visible++;
-					} else {
-						$li.addClass('hidden');
-					}
-				});
-
-				if (visible === 0) {
-					self.$dropMenu.append('<li class="empty-indicator text-muted"><em>No Matches</em></li>');
-				}
-			}
-		},
-
-		_init : function() {
-			this.$element = $(this._elm);
-
-			this.$dropMenu = this.$element.find('.dropdown-menu');
-			this.$input = this.$element.find('input');
-			this.$button = this.$element.find('.btn');
-			this.$button.dropdown();
-			this.$inputGroupBtn = this.$element.find('.input-group-btn');
-
-			this.$element.on('click.lark', 'a', langx.proxy(this.itemclicked, this));
-			this.$element.on('change.lark', 'input', langx.proxy(this.inputchanged, this));
-			this.$element.on('shown.bs.dropdown', langx.proxy(this.menuShown, this));
-			this.$input.on('keyup.lark', langx.proxy(this.keypress, this));
-
-			// set default selection
-			this.setDefaultSelection();
-
-			// if dropdown is empty, disable it
-			var items = this.$dropMenu.children('li');
-			if( items.length === 0) {
-				this.$button.addClass('disabled');
-			}
-
-			// filter on load in case the first thing they do is press navigational key to pop open the menu
-			if (this.options.filterOnKeypress) {
-				this.options.filter(this.$dropMenu.find('li'), this.$input.val(), this);
-			}
-		},
-
-		_destroy: function () {
-			this.$element.remove();
-			// remove any external bindings
-			// [none]
-
-			// set input value attrbute in markup
-			this.$element.find('input').each(function () {
-				$(this).attr('value', $(this).val());
-			});
-
-			// empty elements to return to original markup
-			// [none]
-
-			return this.$element[0].outerHTML;
-		},
-
-		doSelect: function ($item) {
-
-			if (typeof $item[0] !== 'undefined') {
-				// remove selection from old item, may result in remove and
-				// re-addition of class if item is the same
-				this.$element.find('li.selected:first').removeClass('selected');
-
-				// add selection to new item
-				this.$selectedItem = $item;
-				this.$selectedItem.addClass('selected');
-
-				// update input
-				this.$input.val(this.$selectedItem.text().trim());
-			} else {
-				// this is a custom input, not in the menu
-				this.$selectedItem = null;
-				this.$element.find('li.selected:first').removeClass('selected');
-			}
-		},
-
-		clearSelection: function () {
-			this.$selectedItem = null;
-			this.$input.val('');
-			this.$dropMenu.find('li').removeClass('selected');
-		},
-
-		menuShown: function () {
-			if (this.options.autoResizeMenu) {
-				this.resizeMenu();
-			}
-		},
-
-		resizeMenu: function () {
-			var width = this.$element.outerWidth();
-			this.$dropMenu.outerWidth(width);
-		},
-
-		selectedItem: function () {
-			var item = this.$selectedItem;
-			var data = {};
-
-			if (item) {
-				var txt = this.$selectedItem.text().trim();
-				data = langx.mixin({
-					text: txt
-				}, this.$selectedItem.data());
-			} else {
-				data = {
-					text: this.$input.val().trim(),
-					notFound: true
-				};
-			}
-
-			return data;
-		},
-
-		selectByText: function (text) {
-			var $item = $([]);
-			this.$element.find('li').each(function () {
-				if ((this.textContent || this.innerText || $(this).text() || '').trim().toLowerCase() === (text || '').trim().toLowerCase()) {
-					$item = $(this);
-					return false;
-				}
-			});
-
-			this.doSelect($item);
-		},
-
-		selectByValue: function (value) {
-			var selector = 'li[data-value="' + value + '"]';
-			this.selectBySelector(selector);
-		},
-
-		selectByIndex: function (index) {
-			// zero-based index
-			var selector = 'li:eq(' + index + ')';
-			this.selectBySelector(selector);
-		},
-
-		selectBySelector: function (selector) {
-			var $item = this.$element.find(selector);
-			this.doSelect($item);
-		},
-
-		setDefaultSelection: function () {
-			var selector = 'li[data-selected=true]:first';
-			var item = this.$element.find(selector);
-
-			if (item.length > 0) {
-				// select by data-attribute
-				this.selectBySelector(selector);
-				item.removeData('selected');
-				item.removeAttr('data-selected');
-			}
-		},
-
-		enable: function () {
-			this.$element.removeClass('disabled');
-			this.$input.removeAttr('disabled');
-			this.$button.removeClass('disabled');
-		},
-
-		disable: function () {
-			this.$element.addClass('disabled');
-			this.$input.attr('disabled', true);
-			this.$button.addClass('disabled');
-		},
-
-		itemclicked: function (e) {
-			this.$selectedItem = $(e.target).parent();
-
-			// set input text and trigger input change event marked as synthetic
-			this.$input.val(this.$selectedItem.text().trim()).trigger('change', {
-				synthetic: true
-			});
-
-			// pass object including text and any data-attributes
-			// to onchange event
-			var data = this.selectedItem();
-
-			// trigger changed event
-			this.$element.trigger('changed.lark', data);
-
-			e.preventDefault();
-
-			// return focus to control after selecting an option
-			this.$element.find('.dropdown-toggle').focus();
-		},
-
-		keypress: function (e) {
-			var ENTER = 13;
-			//var TAB = 9;
-			var ESC = 27;
-			var LEFT = 37;
-			var UP = 38;
-			var RIGHT = 39;
-			var DOWN = 40;
-
-			var IS_NAVIGATIONAL = (
-				e.which === UP ||
-				e.which === DOWN ||
-				e.which === LEFT ||
-				e.which === RIGHT
-			);
-
-			if(this.options.showOptionsOnKeypress && !this.$inputGroupBtn.hasClass('open')){
-				this.$button.dropdown('toggle');
-				this.$input.focus();
-			}
-
-			if (e.which === ENTER) {
-				e.preventDefault();
-
-				var selected = this.$dropMenu.find('li.selected').text().trim();
-				if(selected.length > 0){
-					this.selectByText(selected);
-				}else{
-					this.selectByText(this.$input.val());
-				}
-
-				this.$inputGroupBtn.removeClass('open');
-			} else if (e.which === ESC) {
-				e.preventDefault();
-				this.clearSelection();
-				this.$inputGroupBtn.removeClass('open');
-			} else if (this.options.showOptionsOnKeypress) {
-				if (e.which === DOWN || e.which === UP) {
-					e.preventDefault();
-					var $selected = this.$dropMenu.find('li.selected');
-					if ($selected.length > 0) {
-						if (e.which === DOWN) {
-							$selected = $selected.next(':not(.hidden)');
-						} else {
-							$selected = $selected.prev(':not(.hidden)');
-						}
-					}
-
-					if ($selected.length === 0){
-						if (e.which === DOWN) {
-							$selected = this.$dropMenu.find('li:not(.hidden):first');
-						} else {
-							$selected = this.$dropMenu.find('li:not(.hidden):last');
-						}
-					}
-					this.doSelect($selected);
-				}
-			}
-
-			// Avoid filtering on navigation key presses
-			if (this.options.filterOnKeypress && !IS_NAVIGATIONAL) {
-				this.options.filter(this.$dropMenu.find('li'), this.$input.val(), this);
-			}
-
-			this.previousKeyPress = e.which;
-		},
-
-		inputchanged: function (e, extra) {
-			var val = $(e.target).val();
-			// skip processing for internally-generated synthetic event
-			// to avoid double processing
-			if (extra && extra.synthetic) {
-				this.selectByText(val);
-				return;
-			}
-			this.selectByText(val);
-
-			// find match based on input
-			// if no match, pass the input value
-			var data = this.selectedItem();
-			if (data.text.length === 0) {
-				data = {
-					text: val
-				};
-			}
-
-			// trigger changed event
-			this.$element.trigger('changed.lark', data);
-		}
-
-	});
-
-
-
-	ComboBox.prototype.getValue = ComboBox.prototype.selectedItem;
-
-
-
-	return swt.ComboBox = ComboBox;
-});
-
-define('skylark-widgets-swt/TextBox',[
-  "skylark-langx/langx",
-  "skylark-domx-browser",
-  "skylark-domx-eventer",
-  "skylark-domx-noder",
-  "skylark-domx-geom",
-  "skylark-domx-query",
-  "./swt",
-  "./Widget"
-],function(langx,browser,eventer,noder,geom,$,swt,Widget){
-
-  var SyncAttrs = [
-    'rows', 'spellcheck', 'maxLength', 'size', 'readonly', 'min',
-    'max', 'step', 'list', 'pattern', 'placeholder', 'required', 'multiple'
-  ];
-
-	var TextBox =  swt.TextBox = Widget.inherit({
-		klassName: "TextBox",
-
-    pluginName: "lark.textbox",
-
-    /*
-     * Parse options from attached dom element.
-     * @override
-     */
-    _parse : function() {
-      var  velm = this._velm;
-
-      // get multiline option
-      this.options.multiline = velm.is("textarea");
-      
-      // get current state of input
-      var value = $chk.prop('checked');
-      var disabled = $chk.prop('disabled');
-      this.state.set("value",value);
-      this.state.set(("disabled",disabled));
-
-    },
-
-    /*
-     * Create a new  dom element for this widget
-     * @override
-     */
-    _create : function() {
-      var tagName = "input",attrs = {},
-          options = this.options;
-
-      langx.each([
-        'rows', 'spellcheck', 'maxLength', 'size', 'readonly', 'min',
-        'max', 'step', 'list', 'pattern', 'placeholder', 'required', 'multiple'
-      ], function (name) {
-        attrs[name] = options[name];
-      });
-
-      if (options.multiline) {
-        tagName = "textarea"
-      } 
-      if (options.subtype) {
-        attrs.type = options.subtype;
-      }
-      this._elm = this._dom.noder.createElement(tagName,attrs);
-    },
-
-    /*
-     * Init this widget
-     * @override
-     */
-    _init : function() {
-    },
-
-    /*
-     * Sync dom element to widget state 
-     * @override
-     */
-    _sync : function() {
-      // handle internal events
-      var self = this;
-      this._velm.on('change', function(evt) {
-        var value = self._velm.prop('value');
-        self.state.set("value",value);
-      });
-    },
-
-    _refresh : function(updates) {
-        var self  = this;
-
-        if (updates["value"] !== undefined) {
-          if (self._velm.value() !== e.value) {
-            self._velm.value(updates.value);
-          }
-        }
-        if (updates["disabled"] !== undefined) {
-          self._velm.disable(updates["disabled"]);
-        }
-
-        // update visual with attribute values from control
-        this.overrided(changed);
-    },
-
-  });
-
-	return TextBox;
-});
-
-
-
- define('skylark-widgets-swt/Listing',[
-  "skylark-langx/langx",
-  "skylark-domx-query",
-  "./swt",
-  "./Widget"
-],function(langx,$,swt,Widget){
-
-    var Listing = Widget.inherit({
-        klassName : "Listing",
-
-        pluginName : "lark.listing",
-
-        options : {
-        	multiSelect: false,
-        	//multiTier : false,
-
-          multiTier : {
-            mode   : "",  // "tree" or "accordion" or "popup"
-            levels : 2,
-            selectors :  {
-              children : "ul",  // "> .list-group"
-              hasChildren : ":has(ul)"
-            },
-            tree : {
-              classes : {
-                expandIcon: 'glyphicon-plus',    // "glyphicon-chevron-down", 'glyphicon-folder-open'
-                collapseIcon: 'glyphicon-minus', // "glyphicon-chevron-right", 'glyphicon-folder-close'
-                children : ""                              // "list-group children"
-              },
-              templates : {
-                treeIcon : "<i class=\"glyphicon\"></i>",
-                itemGroup: ""
-
-              },
-              selectors : {
-                treeIcon : " > i"
-              }
-            },
-
-            accordion : {
-              selectors : {
-                toggler : " > a"
-              }
-
-            }
-          },
-
-        	toggle : false,
-        	classes : {
-          	active : "active"
-        	},
-
-
-        	selectors : {
-          	item : "li",                   // ".list-group-item"
-
-        	},
-
-          item : {
-            template : "<span><i class=\"glyphicon\"></i><a href=\"javascript: void(0);\"></a> </span>",
-            checkable : false,
-            selectors : {
-              icon : " > span > i",
-              text : " > span > a"
-            }
-          },
-
-        	selected : 0
-        },
-
-        state : {
-          selected : Object
-        },
-
-        _init : function() {
-            this.overrided();
-            var self = this,
-                velm = this._velm,
-                itemSelector = this.options.selectors.item;
-
-            this._$items = velm.$(itemSelector);
-
-            velm.on('click', itemSelector, function () {
-                var veItem = self._elmx(this);
-
-                if (!veItem.hasClass('disabled')) {
-                  var value = veItem.data("value");
-                  if (value === undefined) {
-                    value = self._$items.index(this);
-                  }
-                  self.state.set("selected",value);
-                }
-
-                //veItem.blur();
-                return false;
-            });
-            this.state.set("selected",this.options.selected);
-
-            var $this = velm,
-                $toggle = this.options.toggle,
-                multiTierMode = this.options.multiTier.mode,
-                hasChildrenSelector = this.options.multiTier.selectors.hasChildren,
-                childrenSelector = this.options.multiTier.selectors.children,
-                iconSelector = this.options.item.selectors.icon,
-                textSelector = this.options.item.selectors.text,
-                itemTemplate = this.options.item.template,                
-                obj = this;
-
-
-            if (multiTierMode) {
-              if (multiTierMode == "tree") {
-                   var treeIconTemplate = this.options.multiTier.tree.templates.treeIcon,
-                       treeIconSelector = this.options.multiTier.tree.selectors.treeIcon,
-                       expandIconClass = this.options.multiTier.tree.classes.expandIcon,
-                       collapseIconClass = this.options.multiTier.tree.classes.collapseIcon;
-
-                   this._$items.each(function(){
-                     if($(this).is(hasChildrenSelector)) {
-                        var children = $(this).find(childrenSelector);
-                        $(children).remove();
-                        text = $(this).text().trim();
-                        $(this).html(treeIconTemplate+itemTemplate);
-                        $(this).find(treeIconSelector).addClass(expandIconClass).on("click" + "." + self.pluginName, function(e) {
-                            e.preventDefault();
-
-                            $(this).toggleClass(expandIconClass).toggleClass(collapseIconClass);
-
-                            $(this).closest("li").toggleClass("active").children("ul").collapse("toggle");
-
-                            if ($toggle) {
-                                $(this).closest("li").siblings().removeClass("active").children("ul.in").collapse("hide");
-                            }
-                        });
-
-                        $(this).find(iconSelector).addClass('glyphicon-folder-open');
-                        $(this).find(textSelector).text(text);
-                        $(this).append(children);
-
-
-
-                      }  else {
-                        text = $(this).text().trim();
-                        $(this).html(treeIconTemplate+itemTemplate);
-                        $(this).find(iconSelector).addClass('glyphicon-file');
-                        $(this).find(textSelector).text(text);
-                    }
-
-                   });
-              } else if (multiTierMode == "accordion") {
-                var togglerSelector = self.options.multiTier.accordion.selectors.toggler;
-
-                this._$items.has(childrenSelector).find(togglerSelector).on("click" + "." + this.pluginName, function(e) {
-                    e.preventDefault();
-
-                    $(this).closest(itemSelector).toggleClass("active").children(childrenSelector).collapse("toggle");
-
-                    if ($toggle) {
-                        $(this).closest(itemSelector).siblings().removeClass("active").children(childrenSelector+".in").collapse("hide");
-                    }
-                });
-              }
-
-
-             this._$items.filter(".active").has(childrenSelector).children(childrenSelector).addClass("collapse in");
-             this._$items.not(".active").has(childrenSelector).children(childrenSelector).addClass("collapse");
-
-              
-            }   
-        },
-
-        _refresh : function(updates) {
-          this.overrided(updates);
-          var self  = this;
-
-          function findItem(valueOrIdx) {
-            var $item;
-            if (langx.isNumber(valueOrIdx)) {
-              $item = self._$items.eq(valueOrIdx);
-            } else {
-              $item = self._$items.filter('[data-value="' + valueOrIdx + '"]');
-            }
-            return $item;
-          } 
-                 
-          function selectOneItem(valueOrIdx) {
-            findItem(valueOrIdx).addClass(self.options.classes.active);
-          }
-
-          function unselectOneItem(valueOrIdx) {
-            findItem(valueOrIdx).removeClass(self.options.classes.active);
-          }
-
-          if (updates["selected"]) {
-            if (this.options.multiSelect) {
-            } else {
-              unselectOneItem(updates["selected"].oldValue);
-              selectOneItem(updates["selected"].value);
-            }
-
-          }
-        }
-
-  });
-
-  return swt.Listing = Listing;
-
-});
-
-
-
-
-define('skylark-widgets-swt/Pagination',[
-  "skylark-langx/langx",
-  "skylark-domx-browser",
-  "skylark-domx-eventer",
-  "skylark-domx-noder",
-  "skylark-domx-geom",
-  "skylark-domx-query",
-  "./swt",
-  "./Widget"
-],function(langx,browser,eventer,noder,geom,$,swt,Widget){
-
-    'use strict';
-
-    var Pagination = swt.Pagination = Widget.inherit({
-        klassName : "Pagination",
-
-        pluginName : "lark.pagination",
-
-        options : {
-            tagName : "ul",
-            css : "",
-            selectors : {
-                firstNavi : "li[aria-label='first']",
-                prevNavi : "li[aria-label='prev']",
-                nextNavi : "li[aria-label='next']",
-                lastNavi : "li[aria-label='last']",
-                numericNavi : "li:not([aria-label])",
-                numericTxt  : "a"
-            },
-            totalPages: 7,
-            maxButtonsVisible: 5,
-            currentPage: 1     
-        },
-
-        state : {
-            totalPages : Number,
-            currentPage : Number
-        },
-
-        _parse : function(elm,options) {
-
-        },
-        
-        _create : function(self) {
-        },
-
-        _init : function() {
-          this.$first = this._velm.$(this.options.selectors.firstNavi);
-          this.$prev = this._velm.$(this.options.selectors.prevNavi);
-          this.$last = this._velm.$(this.options.selectors.lastNavi);
-          this.$next = this._velm.$(this.options.selectors.nextNavi);
-          this.$numeric = this._velm.$(this.options.selectors.numericNavi);
-
-          var self = this;
-
-          function checkCanAction(elm) {
-            var $elm = $(elm);
-            if ($elm.is(".disabled,.active")) {
-              return false;
-            } else {
-              return $elm;
-            }
-          }
-
-          this.$first.click(function(){
-            if (!checkCanAction(this)) {
-              return;
-            }
-            self.currentPage(1);
-          });
-
-          this.$prev.click(function(){
-            if (!checkCanAction(this)) {
-              return;
-            }
-            self.currentPage(self.currentPage()-1);
-          });
-
-          this.$last.click(function(){
-            if (!checkCanAction(this)) {
-              return;
-            }
-            self.currentPage(self.totalPages());
-          });
-
-          this.$next.click(function(){
-            if (!checkCanAction(this)) {
-              return;
-            }
-            self.currentPage(self.currentPage()+1);
-          });
-
-          this.$numeric.click(function(){
-            var ret = checkCanAction(this)
-            if (!ret) {
-              return;
-            }
-            var numeric = ret.find(self.options.selectors.numericTxt).text(),
-                pageNo = parseInt(numeric);
-            self.currentPage(pageNo);
-
-          });
-
-          this.state.set("currentPage",this.options.currentPage);
-          this.state.set("totalPages",this.options.totalPages);
-
-          this.overrided();
-        },
-
-        _refresh: function (updates) {
-          this.overrided(updates);
-          var self = this;
-
-          function changePageNoBtns(currentPage,totalPages) {
-
-            // Create the numeric buttons.
-            // Variable of number control in the buttons.
-            var totalPageNoBtns = Math.min(totalPages, self.options.maxButtonsVisible);
-            var begin = 1;
-            var end = begin + totalPageNoBtns - 1;
-
-            /*
-             * Align the values in the begin and end variables if the user has the
-             * possibility that select a page that doens't appear in the paginador.
-             * e.g currentPage = 1, and user go to the 20 page.
-             */
-            while ((currentPage < begin) || (currentPage > end)) {
-              if (currentPage > end) {
-                 begin += totalPageNoBtns;
-                 end += totalPageNoBtns;
-
-                 if (end > totalPages) {
-                   begin = begin - (end - totalPages);
-                   end = totalPages;
-                 }
-               } else {
-                 begin -= totalPageNoBtns;
-                 end -= totalPageNoBtns;
-
-                 if (begin < 0) {
-                   end = end + (begin + totalPageNoBtns);
-                   begin = 1;
-                 }
-               }
-            }
-           /*
-            * Verify if the user clicks in the last page show by paginator.
-            * If yes, the paginator advances.
-            */
-            if ((currentPage === end) && (totalPages != 1)) {
-              begin = currentPage - 1;
-              end = begin + totalPageNoBtns - 1;
-
-              if (end >= totalPages) {
-                begin = begin - (end - (totalPages));
-                end = totalPages;
-              }
-            }
-
-            /*
-             * Verify it the user clicks in the first page show by paginator.
-             * If yes, the paginator retrogress
-             */
-             if ((begin === currentPage) && (totalPages != 1)) {
-               if (currentPage != 1) {
-                 end = currentPage + 1;
-                 begin = end - (totalPageNoBtns - 1);
-               }
-             }
-
-             var count = self.$numeric.size(),
-                 visibles = end-begin + 1,
-                 i = 0;
-
-             self.$numeric.filter(".active").removeClass("active");
-             while (i<visibles) {
-               var pageNo = i + begin,
-                   $btn = self.$numeric.eq(i);
-               $btn.find(self.options.selectors.numericTxt).text(i+begin).show();
-               if (pageNo == currentPage) {
-                $btn.addClass("active");
-               }
-               i++;
-             }
-             while (i<count) {
-               self.$numeric.eq(i).find(self.options.selectors.numericTxt).text(i+begin).hide();
-               i++;
-             }
-
-
-          }
-
-          function changeLabeldBtns(currentPage,totalPages) {
-            if (currentPage < 1) {
-              throw('Page can\'t be less than 1');
-            } else if (currentPage > totalPages) {
-              throw('Page is bigger than total pages');
-            }
-
-            if (totalPages < 1) {
-              throw('Total Pages can\'t be less than 1');
-            }
-
-            if (currentPage == 1 ) {
-              self.$first.addClass("disabled");
-              self.$prev.addClass("disabled");
-            } else {
-              self.$first.removeClass("disabled");
-              self.$prev.removeClass("disabled");
-            }
-
-            if (currentPage == totalPages ) {
-              self.$last.addClass("disabled");
-              self.$next.addClass("disabled");
-            } else {
-              self.$last.removeClass("disabled");
-              self.$next.removeClass("disabled");
-            }
-          }
-
-          if (updates.currentPage || updates.totalPages) {
-            var currentPage = self.currentPage(),
-                totalPages = self.totalPages();
-
-            changePageNoBtns(currentPage,totalPages);
-            changeLabeldBtns(currentPage,totalPages);
-          }
-
-        }
-
-    });
-
-    return Pagination;
-});
-define('skylark-widgets-swt/Progress',[
-  "skylark-langx/langx",
-  "skylark-domx-browser",
-  "skylark-domx-eventer",
-  "skylark-domx-noder",
-  "skylark-domx-geom",
-  "skylark-domx-query",
-  "./swt",
-  "./Widget"
-],function(langx,browser,eventer,noder,geom,$,swt,Widget){
-
-    'use strict';
-
-     var Progress = swt.Progress = Widget.inherit({
-     	klassName : "Progress",
-
-     	pluginName : "lark.progress",
-
-     	options : {
-     		selectors : {
-     			bar : "progress-bar"
-     		},
-     		min : 0,
-     		max : 100
-     	},
-
-     	state : {
-     		value : Number
-     	},
-
-		_init : function() {
-			this._vbar = this._velm.find(this.options.selectors.bar);
-			this.value(this.options.min);
-		},
-
-		_refresh : function() {
-	        this.overrided(changed);
-	        var self  = this;
-
-	        if (updates["value"] !== undefined) {
-	        	var value = updates["value"],
-	        		min = this.options.min,
-	        		max = this.options.max;
-
-				this._vbar.css("width",(value-min)/(max-min)*100+"%");
-	        }
-		},
-
-		start : function(max){
-			this.value(this.options.min);
-			this._velm.slideDown();
-		},
-
-		increase : function(tick){
-			var value = this.value();
-			this.value(value += tick*1.0);
-		},
-
-		finish : function(){
-			this.value(this.options.min);
-			this._velm.slideUp();
-		}     	
-     });
-
-	return Progress;
-	
- });
-define('skylark-widgets-swt/Radio',[
-  "skylark-langx/langx",
-  "skylark-domx-browser",
-  "skylark-domx-eventer",
-  "skylark-domx-noder",
-  "skylark-domx-geom",
-  "skylark-domx-query",
-  "./swt",
-  "./_Toggler"
-],function(langx,browser,eventer,noder,geom,$,swt,_Toggler){
-
-  var Radio = swt.Radio = _Toggler.inherit({
-    klassName: "Radio",
-
-    pluginName : "lark.radio",
-
-    _parse : function() {
-      var $radio = this.$radio;
-
-      // get current state of input
-      var checked = $radio.prop('checked');
-      var disabled = $radio.prop('disabled');
-
-      this.state.set("checked",checked);
-      this.state.set(("disabled",disabled));
-
-    },
-
-    _init : function() {
-      //this.options = langx.mixin({}, $.fn.checkbox.defaults, options);
-      var element = this.domNode;
-      var $element = $(element);
-
-      if (element.tagName.toLowerCase() !== 'label') {
-        logError('Radio must be initialized on the `label` that wraps the `input` element. See https://github.com/ExactTarget/fuelux/blob/master/reference/markup/checkbox.html for example of proper markup. Call `.checkbox()` on the `<label>` not the `<input>`');
-        return;
-      }
-
-      // cache elements
-      this.$label = $element;
-      this.$radio = this.$label.find('input[type="checkbox"]');
-      this.$container = $element.parent('.checkbox'); // the container div
-
-      if (!this.options.ignoreVisibilityCheck && this.$radio.css('visibility').match(/hidden|collapse/)) {
-        logError('For accessibility reasons, in order for tab and space to function on checkbox, checkbox `<input />`\'s `visibility` must not be set to `hidden` or `collapse`. See https://github.com/ExactTarget/fuelux/pull/1996 for more details.');
-      }
-
-      // determine if a toggle container is specified
-      var containerSelector = this.$radio.attr('data-toggle');
-      this.$toggleContainer = $(containerSelector);
-
-
-      // set default state
-      this.setInitialState();
-    },
-
-    _sync : function() {
-      // handle internal events
-      var self = this;
-      this.$radio.on('change', function(evt) {
-        //var $radio = $(evt.target);
-        var checked = self.$radio.prop('checked');
-        self.state.set("checked",checked);
-      });
-    },
-
-    _refresh : function(updates) {
-
-        function setCheckedState (checked) {
-          var $radio = self.$radio;
-          var $lbl = self.$label;
-          var $containerToggle = self.$toggleContainer;
-
-          if (checked) {
-            // reset all items in group
-            this.resetGroup();
-
-            $radio.prop('checked', true);
-            $lbl.addClass('checked');
-            $containerToggle.removeClass('hide hidden');
-          } else {
-            $radio.prop('checked', false);
-            $lbl.removeClass('checked');
-            $containerToggle.addClass('hidden');
-          }
-        }
-
-        function setDisabledState (disabled) {
-          var $radio = self.$radio;
-          var $lbl = self.$label;
-
-          if (disabled) {
-            $radio.prop('disabled', true);
-            $lbl.addClass('disabled');
-          } else {
-            $radio.prop('disabled', false);
-            $lbl.removeClass('disabled');
-          }
-        }
-
-        // update visual with attribute values from control
-        this.overrided(changed);
-        var self  = this;
-
-        if (updates["checked"]) {
-          setCheckedState(updates["checked"].value);
-        }
-        if (updates["disabled"]) {
-          setDisabledState(updates["disabled"].value);
-        }
-    },
-
-    resetGroup: function resetGroup () {
-      var $radios = $('input[name="' + this.groupName + '"]');
-      $radios.each(function resetRadio (index, item) {
-        var $radio = $(item);
-        var $lbl = $radio.parent();
-        var containerSelector = $radio.attr('data-toggle');
-        var $containerToggle = $(containerSelector);
-
-
-        $lbl.removeClass('checked');
-        $containerToggle.addClass('hidden');
-      });
-    }
-  });
-
-  return Radio;
-});
-
-
-define('skylark-widgets-swt/SearchBox',[
-  "skylark-langx/langx",
-  "skylark-domx-browser",
-  "skylark-domx-eventer",
-  "skylark-domx-noder",
-  "skylark-domx-geom",
-  "skylark-domx-query",
-  "./swt",
-  "./Widget",
-  "skylark-bootstrap3/dropdown"
-],function(langx,browser,eventer,noder,geom,$,swt,Widget){
-
-
-	// SEARCH CONSTRUCTOR AND PROTOTYPE
-
-	var SearchBox = Widget.inherit({
-		klassName: "SearchBox",
-
-		pluginName: "lark.searchbox",
-
-		options : {
-			clearOnEmpty: false,
-			searchOnKeyPress: false,
-			allowCancel: false
-		},
-	
-		_init : function() {
-			this.$element = $(this._elm);
-			this.$repeater = this.$element.closest('.repeater');
-
-			if (this.$element.attr('data-searchOnKeyPress') === 'true'){
-				this.options.searchOnKeyPress = true;
-			}
-
-			this.$button = this.$element.find('button');
-			this.$input = this.$element.find('input');
-			this.$icon = this.$element.find('.glyphicon, .fuelux-icon');
-
-			this.$button.on('click.fu.search', langx.proxy(this.buttonclicked, this));
-			this.$input.on('keyup.fu.search', langx.proxy(this.keypress, this));
-
-			if (this.$repeater.length > 0) {
-				this.$repeater.on('rendered.fu.repeater', langx.proxy(this.clearPending, this));
-			}
-
-			this.activeSearch = '';
-		},
-		destroy: function () {
-			this.$element.remove();
-			// any external bindings
-			// [none]
-			// set input value attrbute
-			this.$element.find('input').each(function () {
-				$(this).attr('value', $(this).val());
-			});
-			// empty elements to return to original markup
-			// [none]
-			// returns string of markup
-			return this.$element[0].outerHTML;
-		},
-
-		search: function (searchText) {
-			if (this.$icon.hasClass('glyphicon')) {
-				this.$icon.removeClass('glyphicon-search').addClass('glyphicon-remove');
-			}
-			if (this.$icon.hasClass('fuelux-icon')) {
-				this.$icon.removeClass('fuelux-icon-search').addClass('fuelux-icon-remove');
-			}
-
-			this.activeSearch = searchText;
-			this.$element.addClass('searched pending');
-			this.$element.trigger('searched.fu.search', searchText);
-		},
-
-		clear: function () {
-			if (this.$icon.hasClass('glyphicon')) {
-				this.$icon.removeClass('glyphicon-remove').addClass('glyphicon-search');
-			}
-			if (this.$icon.hasClass('fuelux-icon')) {
-				this.$icon.removeClass('fuelux-icon-remove').addClass('fuelux-icon-search');
-			}
-
-			if (this.$element.hasClass('pending')) {
-				this.$element.trigger('canceled.fu.search');
-			}
-
-			this.activeSearch = '';
-			this.$input.val('');
-			this.$element.trigger('cleared.fu.search');
-			this.$element.removeClass('searched pending');
-		},
-
-		clearPending: function () {
-			this.$element.removeClass('pending');
-		},
-
-		action: function () {
-			var val = this.$input.val();
-
-			if (val && val.length > 0) {
-				this.search(val);
-			} else {
-				this.clear();
-			}
-		},
-
-		buttonclicked: function (e) {
-			e.preventDefault();
-			if ($(e.currentTarget).is('.disabled, :disabled')) return;
-
-			if (this.$element.hasClass('pending') || this.$element.hasClass('searched')) {
-				this.clear();
-			} else {
-				this.action();
-			}
-		},
-
-		keypress: function (e) {
-			var ENTER_KEY_CODE = 13;
-			var TAB_KEY_CODE = 9;
-			var ESC_KEY_CODE = 27;
-
-			if (e.which === ENTER_KEY_CODE) {
-				e.preventDefault();
-				this.action();
-			} else if (e.which === TAB_KEY_CODE) {
-				e.preventDefault();
-			} else if (e.which === ESC_KEY_CODE) {
-				e.preventDefault();
-				this.clear();
-			} else if (this.options.searchOnKeyPress) {
-				// search on other keypress
-				this.action();
-			}
-		},
-
-		disable: function () {
-			this.$element.addClass('disabled');
-			this.$input.attr('disabled', 'disabled');
-
-			if (!this.options.allowCancel) {
-				this.$button.addClass('disabled');
-			}
-		},
-
-		enable: function () {
-			this.$element.removeClass('disabled');
-			this.$input.removeAttr('disabled');
-			this.$button.removeClass('disabled');
-		}
-	});
-
-	return 	swt.SearchBox = SearchBox;
-});
-
-define('skylark-widgets-swt/SelectList',[
-  "skylark-langx/langx",
-  "skylark-domx-browser",
-  "skylark-domx-eventer",
-  "skylark-domx-noder",
-  "skylark-domx-geom",
-  "skylark-domx-query",
-  "./swt",
-  "./Widget",
-  "skylark-bootstrap3/dropdown"
-],function(langx,browser,eventer,noder,geom,$,swt,Widget){
-
-
-	// SELECT CONSTRUCTOR AND PROTOTYPE
-
-	var SelectList = Widget.inherit({
-		klassName: "SelectList",
-
-		pluginName : "lark.selectlist",
-	
-		options : {
-			emptyLabelHTML: '<li data-value=""><a href="#">No items</a></li>'
-
-		},
-
-		_init : function() {
-			this.$element = $(this._elm);
-			//this.options = langx.mixin({}, $.fn.selectlist.defaults, options);
-
-
-			this.$button = this.$element.find('.btn.dropdown-toggle');
-			this.$hiddenField = this.$element.find('.hidden-field');
-			this.$label = this.$element.find('.selected-label');
-			this.$dropdownMenu = this.$element.find('.dropdown-menu');
-
-			this.$button.dropdown();
-
-			this.$element.on('click.fu.selectlist', '.dropdown-menu a', langx.proxy(this.itemClicked, this));
-			this.setDefaultSelection();
-
-			if (this.options.resize === 'auto' || this.$element.attr('data-resize') === 'auto') {
-				this.resize();
-			}
-
-			// if selectlist is empty or is one item, disable it
-			var items = this.$dropdownMenu.children('li');
-			if( items.length === 0) {
-				this.disable();
-				this.doSelect( $(this.options.emptyLabelHTML));
-			}
-
-			// support jumping focus to first letter in dropdown when key is pressed
-			this.$element.on('shown.bs.dropdown', function () {
-					var $this = $(this);
-					// attach key listener when dropdown is shown
-					$(document).on('keypress.fu.selectlist', function(e){
-
-						// get the key that was pressed
-						var key = String.fromCharCode(e.which);
-						// look the items to find the first item with the first character match and set focus
-						$this.find("li").each(function(idx,item){
-							if ($(item).text().charAt(0).toLowerCase() === key) {
-								$(item).children('a').focus();
-								return false;
-							}
-						});
-
-				});
-			});
-
-			// unbind key event when dropdown is hidden
-			this.$element.on('hide.bs.dropdown', function () {
-					$(document).off('keypress.fu.selectlist');
-			});
-		},
-
-		destroy: function () {
-			this.$element.remove();
-			// any external bindings
-			// [none]
-			// empty elements to return to original markup
-			// [none]
-			// returns string of markup
-			return this.$element[0].outerHTML;
-		},
-
-		doSelect: function ($item) {
-			var $selectedItem;
-			this.$selectedItem = $selectedItem = $item;
-
-			this.$hiddenField.val(this.$selectedItem.attr('data-value'));
-			this.$label.html($(this.$selectedItem.children()[0]).html());
-
-			// clear and set selected item to allow declarative init state
-			// unlike other controls, selectlist's value is stored internal, not in an input
-			this.$element.find('li').each(function () {
-				if ($selectedItem.is($(this))) {
-					$(this).attr('data-selected', true);
-				} else {
-					$(this).removeData('selected').removeAttr('data-selected');
-				}
-			});
-		},
-
-		itemClicked: function (e) {
-			this.$element.trigger('clicked.fu.selectlist', this.$selectedItem);
-
-			e.preventDefault();
-			// ignore if a disabled item is clicked
-			if ($(e.currentTarget).parent('li').is('.disabled, :disabled')) { return; }
-
-			// is clicked element different from currently selected element?
-			if (!($(e.target).parent().is(this.$selectedItem))) {
-				this.itemChanged(e);
-			}
-
-			// return focus to control after selecting an option
-			this.$element.find('.dropdown-toggle').focus();
-		},
-
-		itemChanged: function (e) {
-			//selectedItem needs to be <li> since the data is stored there, not in <a>
-			this.doSelect($(e.target).closest('li'));
-
-			// pass object including text and any data-attributes
-			// to onchange event
-			var data = this.selectedItem();
-			// trigger changed event
-			this.$element.trigger('changed.fu.selectlist', data);
-		},
-
-		resize: function () {
-			var width = 0;
-			var newWidth = 0;
-			var sizer = $('<div/>').addClass('selectlist-sizer');
-
-
-			if (Boolean($(document).find('html').hasClass('fuelux'))) {
-				// default behavior for fuel ux setup. means fuelux was a class on the html tag
-				$(document.body).append(sizer);
-			} else {
-				// fuelux is not a class on the html tag. So we'll look for the first one we find so the correct styles get applied to the sizer
-				$('.fuelux:first').append(sizer);
-			}
-
-			sizer.append(this.$element.clone());
-
-			this.$element.find('a').each(function () {
-				sizer.find('.selected-label').text($(this).text());
-				newWidth = sizer.find('.selectlist').outerWidth();
-				newWidth = newWidth + sizer.find('.sr-only').outerWidth();
-				if (newWidth > width) {
-					width = newWidth;
-				}
-			});
-
-			if (width <= 1) {
-				return;
-			}
-
-			this.$button.css('width', width);
-			this.$dropdownMenu.css('width', width);
-
-			sizer.remove();
-		},
-
-		selectedItem: function () {
-			var txt = this.$selectedItem.text();
-			return langx.mixin({
-				text: txt
-			}, this.$selectedItem.data());
-		},
-
-		selectByText: function (text) {
-			var $item = $([]);
-			this.$element.find('li').each(function () {
-				if ((this.textContent || this.innerText || $(this).text() || '').toLowerCase() === (text || '').toLowerCase()) {
-					$item = $(this);
-					return false;
-				}
-			});
-			this.doSelect($item);
-		},
-
-		selectByValue: function (value) {
-			var selector = 'li[data-value="' + value + '"]';
-			this.selectBySelector(selector);
-		},
-
-		selectByIndex: function (index) {
-			// zero-based index
-			var selector = 'li:eq(' + index + ')';
-			this.selectBySelector(selector);
-		},
-
-		selectBySelector: function (selector) {
-			var $item = this.$element.find(selector);
-			this.doSelect($item);
-		},
-
-		setDefaultSelection: function () {
-			var $item = this.$element.find('li[data-selected=true]').eq(0);
-
-			if ($item.length === 0) {
-				$item = this.$element.find('li').has('a').eq(0);
-			}
-
-			this.doSelect($item);
-		},
-
-		enable: function () {
-			this.$element.removeClass('disabled');
-			this.$button.removeClass('disabled');
-		},
-
-		disable: function () {
-			this.$element.addClass('disabled');
-			this.$button.addClass('disabled');
-		}
-
-	});	
-
-
-	SelectList.prototype.getValue = SelectList.prototype.selectedItem;
-
-
-
-	return swt.SelectList = SelectList;
-});
-
-define('skylark-widgets-swt/Tabular',[
-  "skylark-langx/langx",
-  "skylark-domx-browser",
-  "skylark-domx-eventer",
-  "skylark-domx-noder",
-  "skylark-domx-geom",
-  "skylark-domx-query",
-  "./swt",
-  "./Widget"
-],function(langx,browser,eventer,noder,geom,$,swt,Widget){
-
-    var Tabular = Widget.inherit({
-        klassName : "Tabular",
-
-        pluginName : "lark.tabular",
-
-        options : {
-            buttonClasses : { 
-                append: null, 
-                removeLast: null, 
-                insert: null, 
-                remove: null, 
-                moveUp: null, 
-                moveDown: null, 
-                rowDrag: null 
-            },
-            sectionClasses : { 
-                caption: null, 
-                header: null, 
-                body: null, 
-                subPanel: null, 
-                footer: null 
-            },
-            hideButtons : { 
-                append: false, 
-                removeLast: false, 
-                insert: false, 
-                remove: false, 
-                moveUp: false, 
-                moveDown: false 
-            }
-
-        },
-
-        _showEmptyMessage : function (settings, skipWidthCalculation) {
-            var tbWrap = this._tbWrap;
-
-            var $emptyCell = $('<td></td>').text(settings._i18n.rowEmpty).attr('colspan', settings._finalColSpan);
-            $('table.body tbody', tbWrap).append($('<tr></tr>').addClass('empty').append($emptyCell));
-
-            /*
-            if (!skipWidthCalculation && settings.maxBodyHeight > 0) {
-                // Check scrolling enabled
-                if (settings.autoColumnWidth) {
-                    this._calculateColumnWidth();
-                } else {
-                    // Set the width of empty message cell to the thead width
-                    $emptyCell.width($('table.head', tbWrap).width() - 4);
-                }
-            }
-            */
-        },  
-
-        _calculateColumnWidth : function () {
-            var tbWrap = this._tbWrap;
-
-            var $tbWhole = $('table.body', tbWrap);
-            var $scroller = $('div.scroller', tbWrap);
-            var settings = $tbWhole.data('appendGrid');
-            var tbHeadRow = $('table.head tr.columnHead', tbWrap)[0];
-            var tbColGp = $('table.body colgroup', tbWrap)[0];
-            // Check any rows within the grid
-            if (settings._rowOrder.length > 0) {
-                // Reset the table/column width
-                $('td', tbHeadRow).width('auto');
-                $('col', tbColGp).width('auto');
-                $tbWhole.width('auto');
-                $scroller.width('auto');
-                // Check the total number of columns
-                var tbBodyRow = $('tbody tr', $tbWhole)[0];
-                var marginThreshold = -2;
-                if ($.fn.modal) {
-                    // If bootstrap is loaded, cell margin was reset
-                    marginThreshold = 1;
-                }
-                var colLimit = Math.min(tbHeadRow.childNodes.length, tbBodyRow.childNodes.length);
-                for (var z = 0; z < colLimit; z++) {
-                    var headCellWidth = tbHeadRow.childNodes[z].clientWidth + 1;
-                    var bodyCellWidth = tbBodyRow.childNodes[z].clientWidth + marginThreshold;
-                    if (bodyCellWidth > headCellWidth) {
-                        tbHeadRow.childNodes[z].style.width = bodyCellWidth + 'px';
-                    } else {
-                        tbColGp.childNodes[z].style.width = headCellWidth + 'px';
-                    }
-                }
-            } else {
-                $('table.body,table.foot', tbWrap).width($('table.head').width());
-            }
-            // Set the width of footer row
-            $('table.foot', tbWrap).width($tbWhole.width());
-            // Check the scroll panel width
-            $scroller.width($tbWhole.width() + $scroller[0].offsetWidth - $scroller[0].clientWidth + 1);
-        },
-
-
-        _createGridButton : function (param, uiIcon) {
-            // Generate the standard grid action button based on its parameter.
-            var genButton = null;
-            if (param) {
-                if (langx.isFunction(param)) {
-                    // Generate button if it is a function.
-                    genButton = $(param());
-                } else if (param.nodeType) {
-                    // Clone the button if it is a DOM element.
-                    genButton = $(param).clone();
-                } else if (param.icon || param.label) {
-                    // Generate jQuery UI Button if it is a plain object with `icon` or `label` property.
-                    genButton = $('<button/>').attr({ type: 'button' });
-                    genButton.plugin("lark.button",param);
-                }
-            }
-            if (!genButton) {
-                // Use default setting (jQuery UI Button) if button is not created.
-                genButton = $('<button/>').attr({ type: 'button' });
-                genButton.plugin("lark.button",{ icon: uiIcon, showLabel: false });
-            }
-            return genButton;
-        },
-
-        _sortSequence : function (startIndex) {
-            var tbWhole = this._elm;
-            var settings = $(tbWhole).data('appendGrid');
-            if (!settings.hideRowNumColumn) {
-                for (var z = startIndex; z < settings._rowOrder.length; z++) {
-                    $('#' + settings.idPrefix + '_Row_' + settings._rowOrder[z] + ' td.first', tbWhole).text(z + 1);
-                }
-            }
-        },
-
-        _emptyGrid : function () {
-            var tbWhole = this._elm;
-
-            // Load settings
-            var settings = $(tbWhole).data('appendGrid');
-            // Remove rows
-            $('tbody', tbWhole).empty();
-            settings._rowOrder.length = 0;
-            settings._uniqueIndex = 0;
-            // Save setting
-            this._saveSetting(settings);
-            // Add empty row
-            this._showEmptyMessage(settings);
-        },        
-
-        _gridRowDragged : function (isMoveUp, uniqueIndex, tbRowIndex) {
-            var tbWhole = this._elm;
-
-            // Get setting
-            var settings = $(tbWhole).data('appendGrid');
-            // Find the start sorting index
-            var startIndex = -1;
-            for (var z = 0; z < settings._rowOrder.length; z++) {
-                if (settings._rowOrder[z] == uniqueIndex) {
-                    if (isMoveUp) {
-                        startIndex = tbRowIndex;
-                        settings._rowOrder.splice(z, 1);
-                        settings._rowOrder.splice(tbRowIndex, 0, uniqueIndex);
-                    } else {
-                        startIndex = z;
-                        settings._rowOrder.splice(tbRowIndex + 1, 0, uniqueIndex);
-                        settings._rowOrder.splice(z, 1);
-                    }
-                    break;
-                }
-            }
-            // Do re-order
-            this._sortSequence( startIndex);
-            // Save setting
-            this._saveSetting(settings);
-
-            // Trigger event
-            if (langx.isFunction(settings.afterRowDragged)) {
-                settings.afterRowDragged(tbWhole, tbRowIndex, uniqueIndex);
-            }
-        },
-
-       _saveSetting : function (settings) {
-            var tbWhole = this._elm;
-
-            $(tbWhole).data('appendGrid', settings);
-            $('#' + settings.idPrefix + '_rowOrder', tbWhole).val(settings._rowOrder.join());
-        },
-
-
-        _checkGridAndGetSettings : function (noMsg) {
-            // Check the jQuery grid object is initialized and return its settings
-
-            var settings = null,
-                $grid = $(this._elm);
-
-            if ($grid.length == 1) {
-                settings = $grid.data('appendGrid');
-                if (!settings && !noMsg) {
-                    alert(_systemMessages.notInit);
-                }
-            } else if (!noMsg) {
-                alert(_systemMessages.getValueMultiGrid);
-            }
-            return settings;
-        },
-
-        _insertRow : function (numOfRowOrRowArray, rowIndex, callerUniqueIndex) {
-            // Define variables
-            var self = this,
-                tbWhole = this._elm;
-            var settings = $(tbWhole).data('appendGrid');
-            var addedRows = [], parentIndex = null, uniqueIndex, ctrl, hidden = [];
-            var tbHead = tbWhole.getElementsByTagName('thead')[0];
-            var tbBody = tbWhole.getElementsByTagName('tbody')[0];
-            var tbRow, tbSubRow = null, tbCell, reachMaxRow = false, calColWidth = false;
-            var oldHeight = 0, oldScroll = 0;
-            /*
-            if (settings.maxBodyHeight > 0) {
-                tbHead = $('#' + settings._wrapperId + ' table thead')[0];
-            }
-            */
-            // Check number of row to be inserted
-            var numOfRow = numOfRowOrRowArray, loadData = false;
-            if (langx.isArray(numOfRowOrRowArray)) {
-                numOfRow = numOfRowOrRowArray.length;
-                loadData = true;
-            }
-            // Check parent row
-            if (langx.isNumeric(callerUniqueIndex)) {
-                for (var z = 0; z < settings._rowOrder.length; z++) {
-                    if (settings._rowOrder[z] == callerUniqueIndex) {
-                        rowIndex = z;
-                        if (z != 0) parentIndex = z - 1;
-                        break;
-                    }
-                }
-            }
-            else if (langx.isNumeric(rowIndex)) {
-                if (rowIndex >= settings._rowOrder.length) {
-                    rowIndex = null;
-                } else {
-                    parentIndex = rowIndex - 1;
-                }
-            }
-            else if (settings._rowOrder.length != 0) {
-                rowIndex = null;
-                parentIndex = settings._rowOrder.length - 1;
-            }
-            // Store old grid height
-            if (settings.maintainScroll && !langx.isNumeric(rowIndex)) {
-                oldHeight = $(tbWhole).height();
-                oldScroll = $(tbWhole).scrollParent().scrollTop();
-            }
-            // Remove empty row
-            if (settings._rowOrder.length == 0) {
-                $('tr.empty', tbWhole).remove();
-                calColWidth = true;
-            }
-            // Add total number of row
-            for (var z = 0; z < numOfRow; z++) {
-                // Check maximum number of rows
-                if (0 < settings.maxRowsAllowed && settings._rowOrder.length >= settings.maxRowsAllowed) {
-                    reachMaxRow = true;
-                    break;
-                }
-                // Update variables
-                settings._uniqueIndex++;
-                uniqueIndex = settings._uniqueIndex;
-                hidden.length = 0;
-                // Check row insert index
-                if (langx.isNumeric(rowIndex)) {
-                    settings._rowOrder.splice(rowIndex, 0, uniqueIndex);
-                    if (settings.useSubPanel) {
-                        tbBody.insertBefore(tbSubRow = document.createElement('tr'), tbBody.childNodes[rowIndex * 2]);
-                        tbBody.insertBefore(tbRow = document.createElement('tr'), tbBody.childNodes[rowIndex * 2]);
-                    } else {
-                        tbBody.insertBefore(tbRow = document.createElement('tr'), tbBody.childNodes[rowIndex]);
-                    }
-                    addedRows.push(rowIndex);
-                }
-                else {
-                    settings._rowOrder.push(uniqueIndex);
-                    tbBody.appendChild(tbRow = document.createElement('tr'));
-                    if (settings.useSubPanel) {
-                        tbBody.appendChild(tbSubRow = document.createElement('tr'));
-                    }
-                    addedRows.push(settings._rowOrder.length - 1);
-                }
-                tbRow.id = settings.idPrefix + '_Row_' + uniqueIndex;
-                if (settings._sectionClasses.body) {
-                    tbRow.className = settings._sectionClasses.body;
-                }
-                $(tbRow).data('appendGrid', uniqueIndex);
-                // Config on the sub panel row
-                if (tbSubRow != null) {
-                    tbSubRow.id = settings.idPrefix + '_SubRow_' + uniqueIndex;
-                    $(tbSubRow).data('appendGrid', uniqueIndex);
-                    if (settings._sectionClasses.subPanel) {
-                        tbSubRow.className = settings._sectionClasses.subPanel;
-                    }
-                }
-                // Add row number
-                if (!settings.hideRowNumColumn) {
-                    tbRow.appendChild(tbCell = document.createElement('td'));
-                    $(tbCell).addClass('ui-widget-content first').text(settings._rowOrder.length);
-                    if (settings.useSubPanel) tbCell.rowSpan = 2;
-                }
-                // Process on each columns
-                for (var y = 0; y < settings.columns.length; y++) {
-                    // Skip hidden
-                    if (settings.columns[y].type == 'hidden') {
-                        hidden.push(y);
-                        continue;
-                    }
-                    // Check column invisble
-                    var className = 'ui-widget-content';
-                    if (settings.columns[y].invisible) className += ' invisible';
-                    // Insert cell
-                    tbRow.appendChild(tbCell = document.createElement('td'));
-                    tbCell.id = settings.idPrefix + '_' + settings.columns[y].name + '_td_' + uniqueIndex;
-                    tbCell.className = className;
-                    if (settings.columns[y].cellCss != null) $(tbCell).css(settings.columns[y].cellCss);
-                    // Prepare control id and name
-                    var ctrlId = settings.idPrefix + '_' + settings.columns[y].name + '_' + uniqueIndex, ctrlName;
-                    if (langx.isFunction(settings.nameFormatter)) {
-                        ctrlName = settings.nameFormatter(settings.idPrefix, settings.columns[y].name, uniqueIndex);
-                    } else {
-                        ctrlName = ctrlId;
-                    }
-                    // Check control type
-                    ctrl = null;
-                    if (settings.columns[y].type == 'custom') {
-                        if (langx.isFunction(settings.columns[y].customBuilder)) {
-                            ctrl = settings.columns[y].customBuilder(tbCell, settings.idPrefix, settings.columns[y].name, uniqueIndex);
-                        }
-                    } else if (settings.columns[y].type == 'select' || settings.columns[y].type == 'ui-selectmenu') {
-                        ctrl = document.createElement('select');
-                        ctrl.id = ctrlId;
-                        ctrl.name = ctrlName;
-                        // Build option list
-                        if (langx.isArray(settings.columns[y].ctrlOptions)) {
-                            // For array type option list
-                            if (settings.columns[y].ctrlOptions.length > 0) {
-                                if (langx.isPlainObject(settings.columns[y].ctrlOptions[0])) {
-                                    // Check to generate optGroup or not
-                                    var lastGroupName = null, lastGroupElem = null;
-                                    for (var x = 0; x < settings.columns[y].ctrlOptions.length; x++) {
-                                        if (!isEmpty(settings.columns[y].ctrlOptions[x].group)) {
-                                            if (lastGroupName != settings.columns[y].ctrlOptions[x].group) {
-                                                lastGroupName = settings.columns[y].ctrlOptions[x].group;
-                                                lastGroupElem = document.createElement('optgroup');
-                                                lastGroupElem.label = lastGroupName;
-                                                ctrl.appendChild(lastGroupElem);
-                                            }
-                                        } else {
-                                            lastGroupElem = null;
-                                        }
-                                        var option = $('<option/>').val(settings.columns[y].ctrlOptions[x].value).text(settings.columns[y].ctrlOptions[x].label);
-                                        if (!isEmpty(settings.columns[y].ctrlOptions[x].title)) {
-                                            option.attr('title', settings.columns[y].ctrlOptions[x].title);
-                                        }
-                                        if (null == lastGroupElem) {
-                                            option.appendTo(ctrl);
-                                        }
-                                        else {
-                                            option.appendTo(lastGroupElem);
-                                        }
-                                        // ctrl.options[ctrl.options.length] = new Option(settings.columns[y].ctrlOptions[x].label, settings.columns[y].ctrlOptions[x].value);
-                                    }
-                                }
-                                else {
-                                    for (var x = 0; x < settings.columns[y].ctrlOptions.length; x++) {
-                                        ctrl.options[ctrl.options.length] = new Option(settings.columns[y].ctrlOptions[x], settings.columns[y].ctrlOptions[x]);
-                                    }
-                                }
-                            }
-                        } else if (langx.isPlainObject(settings.columns[y].ctrlOptions)) {
-                            // For plain object type option list
-                            for (var x in settings.columns[y].ctrlOptions) {
-                                ctrl.options[ctrl.options.length] = new Option(settings.columns[y].ctrlOptions[x], x);
-                            }
-                        } else if (typeof (settings.columns[y].ctrlOptions) == 'string') {
-                            // For string type option list
-                            var arrayOpt = settings.columns[y].ctrlOptions.split(';');
-                            for (var x = 0; x < arrayOpt.length; x++) {
-                                var eqIndex = arrayOpt[x].indexOf(':');
-                                if (-1 == eqIndex) {
-                                    ctrl.options[ctrl.options.length] = new Option(arrayOpt[x], arrayOpt[x]);
-                                } else {
-                                    ctrl.options[ctrl.options.length] = new Option(arrayOpt[x].substring(eqIndex + 1, arrayOpt[x].length), arrayOpt[x].substring(0, eqIndex));
-                                }
-                            }
-                        } else if (langx.isFunction(settings.columns[y].ctrlOptions)) {
-                            settings.columns[y].ctrlOptions(ctrl);
-                        }
-                        tbCell.appendChild(ctrl);
-                        // Handle UI widget
-                        if (settings.columns[y].type == 'ui-selectmenu') {
-                            $(ctrl).selectmenu(settings.columns[y].uiOption);
-                        }
-                    }
-                    else if (settings.columns[y].type == 'checkbox') {
-                        ctrl = document.createElement('input');
-                        ctrl.type = 'checkbox';
-                        ctrl.id = ctrlId;
-                        ctrl.name = ctrlName;
-                        ctrl.value = 1;
-                        tbCell.appendChild(ctrl);
-                        tbCell.style.textAlign = 'center';
-                    }
-                    else if (settings.columns[y].type == 'textarea') {
-                        ctrl = document.createElement('textarea');
-                        ctrl.id = ctrlId;
-                        ctrl.name = ctrlName;
-                        tbCell.appendChild(ctrl);
-                    }
-                    else if (-1 != settings.columns[y].type.search(/^(color|date|datetime|datetime\-local|email|month|number|range|search|tel|time|url|week)$/)) {
-                        ctrl = document.createElement('input');
-                        try {
-                            ctrl.type = settings.columns[y].type;
-                        }
-                        catch (err) { /* Not supported type */ }
-                        ctrl.id = ctrlId;
-                        ctrl.name = ctrlName;
-                        tbCell.appendChild(ctrl);
-                    }
-                    else {
-                        // Generate text input
-                        ctrl = document.createElement('input');
-                        ctrl.type = 'text';
-                        ctrl.id = ctrlId;
-                        ctrl.name = ctrlName;
-                        tbCell.appendChild(ctrl);
-                        // Handle UI widget
-                        if (settings.columns[y].type == 'ui-datepicker') {
-                            $(ctrl).datepicker(settings.columns[y].uiOption);
-                        } else if (settings.columns[y].type == 'ui-spinner') {
-                            $(ctrl).spinner(settings.columns[y].uiOption);
-                        } else if (settings.columns[y].type == 'ui-autocomplete') {
-                            $(ctrl).autocomplete(settings.columns[y].uiOption);
-                        }
-                    }
-                    // Add extra control properties
-                    if (settings.columns[y].type != 'custom') {
-                        // Add control attributes as needed
-                        if (settings.columns[y].ctrlAttr != null) $(ctrl).attr(settings.columns[y].ctrlAttr);
-                        // Add control properties as needed
-                        if (settings.columns[y].ctrlProp != null) $(ctrl).prop(settings.columns[y].ctrlProp);
-                        // Add control CSS as needed
-                        if (settings.columns[y].ctrlCss != null) $(ctrl).css(settings.columns[y].ctrlCss);
-                        // Add control class as needed
-                        if (settings.columns[y].ctrlClass != null) $(ctrl).addClass(settings.columns[y].ctrlClass);
-                        // Add jQuery UI tooltip as needed
-                        if (settings.columns[y].uiTooltip) $(ctrl).tooltip(settings.columns[y].uiTooltip);
-                        // Add control events as needed
-                        if (langx.isFunction(settings.columns[y].onClick)) {
-                            $(ctrl).click({ caller: tbWhole, callback: settings.columns[y].onClick, uniqueIndex: uniqueIndex }, function (evt) {
-                                evt.data.callback(evt, $(evt.data.caller).appendGrid('getRowIndex', evt.data.uniqueIndex));
-                            });
-                        }
-                        if (langx.isFunction(settings.columns[y].onChange)) {
-                            $(ctrl).change({ caller: tbWhole, callback: settings.columns[y].onChange, uniqueIndex: uniqueIndex }, function (evt) {
-                                evt.data.callback(evt, $(evt.data.caller).plugin("lark.tabular").getRowIndex(evt.data.uniqueIndex));
-                            });
-                        }
-                    }
-                    if (loadData) {
-                        // Load data if needed
-                        setCtrlValue(settings, y, uniqueIndex, numOfRowOrRowArray[z][settings.columns[y].name]);
-                    } else if (!isEmpty(settings.columns[y].value)) {
-                        // Set default value
-                        setCtrlValue(settings, y, uniqueIndex, settings.columns[y].value);
-                    }
-                }
-                // Add button cell if needed
-                if (!settings._hideLastColumn || settings.columns.length > settings._visibleCount) {
-                    if (!settings.rowButtonsInFront) {
-                        tbRow.appendChild(tbCell = document.createElement('td'));
-                    } else if (!settings.hideRowNumColumn) {
-                        tbRow.insertBefore(tbCell = document.createElement('td'), tbRow.childNodes[1]);
-                    } else {
-                        tbRow.insertBefore(tbCell = document.createElement('td'), tbRow.firstChild);
-                    }
-                    tbCell.className = 'ui-widget-content last';
-                    tbCell.id = settings.idPrefix + '_last_td_' + uniqueIndex;
-                    if (settings._hideLastColumn) tbCell.style.display = 'none';
-                    // Add standard buttons
-                    if (!settings.hideButtons.insert) {
-                        var button = this._createGridButton(settings.customGridButtons.insert, 'ui-icon-arrowreturnthick-1-w')
-                            .attr({ id: settings.idPrefix + '_Insert_' + uniqueIndex, title: settings._i18n.insert, tabindex: -1 })
-                            .addClass('insert').data('appendGrid', { uniqueIndex: uniqueIndex })
-                            .click(function (evt) {
-                                var rowUniqueIndex = $(this).data('appendGrid').uniqueIndex;
-                                $(tbWhole).plugin("lark.tabular").insertRow(1, null, rowUniqueIndex);
-                                if (evt && evt.preventDefault) evt.preventDefault(settings._buttonClasses.insert);
-                                return false;
-                            }).appendTo(tbCell);
-                        if (!isEmpty(settings._buttonClasses.insert)) button.addClass(settings._buttonClasses.insert);
-                    }
-                    if (!settings.hideButtons.remove) {
-                        var button = this._createGridButton(settings.customGridButtons.remove, 'ui-icon-trash')
-                            .attr({ id: settings.idPrefix + '_Delete_' + uniqueIndex, title: settings._i18n.remove, tabindex: -1 })
-                            .addClass('remove').data('appendGrid', { uniqueIndex: uniqueIndex })
-                            .click(function (evt) {
-                                var rowUniqueIndex = $(this).data('appendGrid').uniqueIndex;
-                                self._removeRow( null, rowUniqueIndex, false);
-                                if (evt && evt.preventDefault) evt.preventDefault();
-                                return false;
-                            }).appendTo(tbCell);
-                        if (!isEmpty(settings._buttonClasses.remove)) button.addClass(settings._buttonClasses.remove);
-                    }
-                    if (!settings.hideButtons.moveUp) {
-                        var button = this._createGridButton(settings.customGridButtons.moveUp, 'ui-icon-arrowthick-1-n')
-                            .attr({ id: settings.idPrefix + '_MoveUp_' + uniqueIndex, title: settings._i18n.moveUp, tabindex: -1 })
-                            .addClass('moveUp').data('appendGrid', { uniqueIndex: uniqueIndex })
-                            .click(function (evt) {
-                                var rowUniqueIndex = $(this).data('appendGrid').uniqueIndex;
-                                $(tbWhole).plugin("lark.tabular").moveUpRow(null, rowUniqueIndex);
-                                if (evt && evt.preventDefault) evt.preventDefault();
-                                return false;
-                            }).appendTo(tbCell);
-                        if (!isEmpty(settings._buttonClasses.moveUp)) button.addClass(settings._buttonClasses.moveUp);
-                    }
-                    if (!settings.hideButtons.moveDown) {
-                        var button = this._createGridButton(settings.customGridButtons.moveDown, 'ui-icon-arrowthick-1-s')
-                            .attr({ id: settings.idPrefix + '_MoveDown_' + uniqueIndex, title: settings._i18n.moveDown, tabindex: -1 })
-                            .addClass('moveDown').data('appendGrid', { uniqueIndex: uniqueIndex })
-                            .click(function (evt) {
-                                var rowUniqueIndex = $(this).data('appendGrid').uniqueIndex;
-                                $(tbWhole).plugin("lark.tabular").moveDownRow(null, rowUniqueIndex);
-                                if (evt && evt.preventDefault) evt.preventDefault();
-                                return false;
-                            }).appendTo(tbCell);
-                        if (!isEmpty(settings._buttonClasses.moveDown)) button.addClass(settings._buttonClasses.moveDown);
-                    }
-                    // Handle row dragging
-                    if (settings.rowDragging) {
-                        var button = $('<div/>').addClass('rowDrag ui-state-default ui-corner-all')
-                            .attr('title', settings._i18n.rowDrag).append($('<div/>').addClass('ui-icon ui-icon-caret-2-n-s').append($('<span/>').addClass('ui-button-text').text('Drag')))
-                            .appendTo(tbCell);
-                        if (!isEmpty(settings._buttonClasses.rowDrag)) button.addClass(settings._buttonClasses.rowDrag);
-                    }
-                    // Add hidden
-                    for (var y = 0; y < hidden.length; y++) {
-                        ctrl = document.createElement('input');
-                        ctrl.id = settings.idPrefix + '_' + settings.columns[hidden[y]].name + '_' + uniqueIndex;
-                        if (langx.isFunction(settings.nameFormatter)) {
-                            ctrl.name = settings.nameFormatter(settings.idPrefix, settings.columns[y].name, uniqueIndex);
-                        } else {
-                            ctrl.name = ctrl.id;
-                        }
-                        ctrl.type = 'hidden';
-
-                        if (loadData) {
-                            // Load data if needed
-                            ctrl.value = numOfRowOrRowArray[z][settings.columns[hidden[y]].name];
-                        } else if (!isEmpty(settings.columns[hidden[y]].value)) {
-                            // Set default value
-                            ctrl.value = settings.columns[hidden[y]].value;
-                        }
-                        tbCell.appendChild(ctrl);
-                    }
-                    // Add extra buttons
-                    if (settings.customRowButtons && settings.customRowButtons.length) {
-                        // Add front buttons
-                        for (var y = settings.customRowButtons.length - 1; y >= 0; y--) {
-                            var buttonCfg = settings.customRowButtons[y];
-                            if (buttonCfg && buttonCfg.uiButton && buttonCfg.click && buttonCfg.atTheFront) {
-                                $(tbCell).prepend(makeCustomRowButton(tbWhole, buttonCfg, uniqueIndex));
-                            }
-                        }
-                        // Add end buttons
-                        for (var y = 0; y < settings.customRowButtons.length; y++) {
-                            var buttonCfg = settings.customRowButtons[y];
-                            if (buttonCfg && buttonCfg.uiButton && buttonCfg.click && !buttonCfg.atTheFront) {
-                                $(tbCell).append(makeCustomRowButton(tbWhole, buttonCfg, uniqueIndex));
-                            }
-                        }
-                    }
-                }
-                // Create sub panel
-                if (settings.useSubPanel) {
-                    tbSubRow.appendChild(tbCell = document.createElement('td'));
-                    tbCell.className = 'ui-widget-content';
-                    tbCell.colSpan = settings._visibleCount + (settings._hideLastColumn ? 0 : 1);
-                    if (langx.isFunction(settings.subPanelBuilder)) {
-                        settings.subPanelBuilder(tbCell, uniqueIndex);
-                    }
-                }
-            }
-            // Check if re-calculate column width is required
-            /*
-            if (0 < settings.maxBodyHeight && settings._calculateWidth && !calColWidth) {
-                var scroll = $('#' + settings._wrapperId + '>div.scroller')[0];
-                if (scroll.scrollHeight > scroll.offsetHeight) {
-                    calColWidth = true;
-                    settings._calculateWidth = false;
-                }
-            }
-            */
-            // Save setting
-            this._saveSetting(settings);
-            // Calculate column width
-            /*
-            if (calColWidth && settings.autoColumnWidth && settings.maxBodyHeight > 0) {
-                this._calculateColumnWidth();
-            }
-            */
-            // Trigger events
-            if (langx.isNumeric(rowIndex)) {
-                if (langx.isFunction(settings.afterRowInserted)) {
-                    settings.afterRowInserted(tbWhole, parentIndex, addedRows);
-                }
-            }
-            else {
-                if (langx.isFunction(settings.afterRowAppended)) {
-                    settings.afterRowAppended(tbWhole, parentIndex, addedRows);
-                }
-            }
-            if (reachMaxRow && langx.isFunction(settings.maxNumRowsReached)) {
-                settings.maxNumRowsReached();
-            }
-            // Scroll the page when append row
-            if (settings.maintainScroll && !langx.isNumeric(rowIndex)) {
-                // Try to maintain the height so that user no need to scroll every time when row added
-                var newHeight = $(tbWhole).height();
-                $(tbWhole).scrollParent().scrollTop(oldScroll + newHeight - oldHeight);
-            }
-            // Return added rows' uniqueIndex
-            return { addedRows: addedRows, parentIndex: parentIndex, rowIndex: rowIndex };
-        },
-
-        _removeRow : function (rowIndex, uniqueIndex, force) {
-            var tbWhole = this._elm;
-
-            var settings = $(tbWhole).data('appendGrid');
-            var tbBody = tbWhole.getElementsByTagName('tbody')[0];
-            if (langx.isNumeric(uniqueIndex)) {
-                for (var z = 0; z < settings._rowOrder.length; z++) {
-                    if (settings._rowOrder[z] == uniqueIndex) {
-                        rowIndex = z;
-                        break;
-                    }
-                }
-            }
-            if (langx.isNumeric(rowIndex)) {
-                // Remove middle row
-                if (force || typeof (settings.beforeRowRemove) != 'function' || settings.beforeRowRemove(tbWhole, rowIndex)) {
-                    settings._rowOrder.splice(rowIndex, 1);
-                    if (settings.useSubPanel) {
-                        tbBody.removeChild(tbBody.childNodes[rowIndex * 2]);
-                        tbBody.removeChild(tbBody.childNodes[rowIndex * 2]);
-                    } else {
-                        tbBody.removeChild(tbBody.childNodes[rowIndex]);
-                    }
-                    // Save setting
-                    this._saveSetting(settings);
-                    // Sort sequence
-                    this._sortSequence( rowIndex);
-                    // Trigger event
-                    if (langx.isFunction(settings.afterRowRemoved)) {
-                        settings.afterRowRemoved(tbWhole, rowIndex);
-                    }
-                }
-            }
-            else {
-                // Store old window scroll value
-                var oldHeight = 0, oldScroll = 0;
-                if (settings.maintainScroll) {
-                    oldHeight = $(tbWhole).height();
-                    oldScroll = $(tbWhole).scrollParent().scrollTop();
-                }
-                // Remove last row
-                if (force || !langx.isFunction(settings.beforeRowRemove) || settings.beforeRowRemove(tbWhole, settings._rowOrder.length - 1)) {
-                    uniqueIndex = settings._rowOrder.pop();
-                    tbBody.removeChild(tbBody.lastChild);
-                    if (settings.useSubPanel) {
-                        tbBody.removeChild(tbBody.lastChild);
-                    }
-                    // Save setting
-                    this._saveSetting(settings);
-                    // Trigger event
-                    if (langx.isFunction(settings.afterRowRemoved)) {
-                        settings.afterRowRemoved(tbWhole, null);
-                    }
-                }
-                // Scroll the page when append row
-                if (settings.maintainScroll) {
-                    // Try to maintain the height so that user no need to scroll every time when row added
-                    var newHeight = $(tbWhole).height();
-                    $(tbWhole).scrollParent().scrollTop(oldScroll + newHeight - oldHeight);
-                }
-            }
-            // Add empty row
-            if (settings._rowOrder.length == 0) {
-                this._showEmptyMessage(settings);
-            }
-        },
-
-        _loadData : function (records, isInit) {
-            var tbWhole = this._elm;
-            var tbBody, tbRow, tbCell, uniqueIndex, insertResult;
-            var settings = $(tbWhole).data('appendGrid');
-            if (settings) {
-                // Clear existing content
-                tbBody = tbWhole.getElementsByTagName('tbody')[0];
-                $(tbBody).empty();
-                settings._rowOrder.length = 0;
-                settings._uniqueIndex = 0;
-                // Check any records
-                if (records != null && records.length) {
-                    // Add rows
-                    insertResult = this._insertRow(records.length, null, null);
-                    // Set data
-                    for (var r = 0; r < insertResult.addedRows.length; r++) {
-                        for (var c = 0; c < settings.columns.length; c++) {
-                            setCtrlValue(settings, c, settings._rowOrder[r], records[r][settings.columns[c].name]);
-                        }
-                        if (langx.isFunction(settings.rowDataLoaded)) {
-                            settings.rowDataLoaded(tbWhole, records[r], r, settings._rowOrder[r]);
-                        }
-                    }
-                }
-                // Save setting
-                settings._isDataLoaded = true;
-                if (isInit) settings.initData = null;
-                $(tbWhole).data('appendGrid', settings);
-                // Trigger data loaded event
-                if (langx.isFunction(settings.dataLoaded)) {
-                    settings.dataLoaded(tbWhole, records);
-                }
-            }
-        },
-
-        _init: function () {
-            var options = this.options,
-                self = this;
-            // Check mandatory paramters included
-            if (!langx.isArray(options.columns) || options.columns.length == 0) {
-                alert(_systemMessages.noColumnInfo);
-            }
-            // Check target element is table or not
-            var tbWhole = this._elm, tbWrap, tbHead, tbBody, tbFoot, tbColGp, tbRow, tbCell;
-            if (isEmpty(tbWhole.tagName) || tbWhole.tagName != 'TABLE') {
-                alert(_systemMessages.elemNotTable);
-            }
-            // Generate settings
-            var settings = langx.extend({}, _defaultInitOptions, _defaultCallbackContainer, options);
-            // Add internal settings
-            langx.extend(settings, {
-                // The UniqueIndex accumulate counter
-                _uniqueIndex: 0,
-                // The row order array
-                _rowOrder: [],
-                // Indicate data is loaded or not
-                _isDataLoaded: false,
-                // Visible column count for internal calculation
-                _visibleCount: 0,
-                // Total colSpan count after excluding `hideRowNumColumn` and not generating last column
-                _finalColSpan: 0,
-                // Indicate to hide last column or not
-                _hideLastColumn: false,
-                // The element ID of the `appendGrid` wrapper
-                _wrapperId: null,
-                // 
-                _calculateWidth: true
-            });
-            // Labels or messages used in grid
-            if (langx.isPlainObject(options.i18n))
-                settings._i18n = langx.extend({}, _defaultTextResources, options.i18n);
-            else
-                settings._i18n = langx.extend({}, _defaultTextResources);
-            // The extra class names for buttons
-            if (langx.isPlainObject(options.buttonClasses))
-                settings._buttonClasses = langx.extend({}, _defaultButtonClasses, options.buttonClasses);
-            else
-                settings._buttonClasses = langx.extend({}, _defaultButtonClasses);
-            // The extra class names for sections
-            if (langx.isPlainObject(options.sectionClasses))
-                settings._sectionClasses = langx.extend({}, _defaultSectionClasses, options.sectionClasses);
-            else
-                settings._sectionClasses = langx.extend({}, _defaultSectionClasses);
-            // Make sure the `hideButtons` setting defined
-            if (langx.isPlainObject(options.hideButtons))
-                settings.hideButtons = langx.extend({}, _defaultHideButtons, options.hideButtons);
-            else
-                settings.hideButtons = langx.extend({}, _defaultHideButtons);
-            // Check `idPrefix` is defined
-            if (isEmpty(settings.idPrefix)) {
-                // Check table ID defined
-                if (isEmpty(tbWhole.id) || tbWhole.id == '') {
-                    // Generate an ID using current time
-                    settings.idPrefix = 'ag' + new Date().getTime();
-                }
-                else {
-                    settings.idPrefix = tbWhole.id;
-                }
-            }
-            // Check custom grid button parameters
-            if (!langx.isPlainObject(settings.customGridButtons)) {
-                settings.customGridButtons = {};
-            }
-            // Check rowDragging and useSubPanel option
-            if (settings.useSubPanel && settings.rowDragging) {
-                settings.rowDragging = false;
-            }
-            // Create thead and tbody
-            tbHead = document.createElement('thead');
-            tbHead.className = 'ui-widget-header';
-            tbBody = document.createElement('tbody');
-            tbBody.className = 'ui-widget-content';
-            tbFoot = document.createElement('tfoot');
-            tbFoot.className = 'ui-widget-header';
-            tbColGp = document.createElement('colgroup');
-            // Prepare the table element
-            settings._wrapperId = settings.idPrefix + '-wrapper';
-            tbWrap = this._tbWrap = document.createElement('div');
-            $(tbWrap).attr('id', settings._wrapperId).addClass('appendGrid').insertAfter(tbWhole);
-            $(tbWhole).empty().addClass('ui-widget').appendTo(tbWrap);
-            // Check if content scrolling is enabled
-            /*
-            if (settings.maxBodyHeight > 0) {
-                // Seperate the thead and tfoot from source table
-                $('<table></table>').addClass('ui-widget head').append(tbHead).prependTo(tbWrap);
-                $(tbWhole).addClass('body').wrap($('<div></div>').addClass('scroller').css('max-height', settings.maxBodyHeight)).append(tbColGp, tbBody);
-                $('<table></table>').addClass('ui-widget foot').append(tbFoot).appendTo(tbWrap);
-            } else {
-                // Add thead, tbody and tfoot to the same table
-                $(tbWhole).addClass('head body foot').append(tbColGp, tbHead, tbBody, tbFoot);
-            }
-            */
-            // Add thead, tbody and tfoot to the same table
-            $(tbWhole).addClass('head body foot').append(tbColGp, tbHead, tbBody, tbFoot);
-
-            // Handle header row
-            var tbHeadCellRowNum, tbHeadCellRowButton;
-            tbHead.appendChild(tbRow = document.createElement('tr'));
-            if (settings._sectionClasses.header) {
-                tbRow.className = 'columnHead ' + settings._sectionClasses.header;
-            } else {
-                tbRow.className = 'columnHead';
-            }
-            if (!settings.hideRowNumColumn) {
-                tbRow.appendChild(tbHeadCellRowNum = document.createElement('td'));
-                tbHeadCellRowNum.className = 'ui-widget-header first';
-                // Add column group for scrolling
-                tbColGp.appendChild(document.createElement('col'));
-            }
-            // Prepare column information and add column header
-            var pendingSkipCol = 0;
-            for (var z = 0; z < settings.columns.length; z++) {
-                // Assign default setting
-                var columnOpt = langx.extend({}, _defaultColumnOptions, settings.columns[z]);
-                settings.columns[z] = columnOpt;
-                // Skip hidden
-                if (settings.columns[z].type != 'hidden') {
-                    // Check column is invisible
-                    if (!settings.columns[z].invisible) {
-                        settings._visibleCount++;
-                    }
-                    // Check skip header colSpan
-                    if (pendingSkipCol == 0) {
-                        var className = 'ui-widget-header';
-                        if (settings.columns[z].invisible) className += ' invisible';
-                        if (settings.columns[z].resizable) className += ' resizable';
-                        tbRow.appendChild(tbCell = document.createElement('td'));
-                        tbCell.id = settings.idPrefix + '_' + settings.columns[z].name + '_td_head';
-                        tbCell.className = className;
-                        if (settings.columns[z].displayCss) $(tbCell).css(settings.columns[z].displayCss);
-                        if (settings.columns[z].headerSpan > 1) {
-                            $(tbCell).attr('colSpan', settings.columns[z].headerSpan);
-                            pendingSkipCol = settings.columns[z].headerSpan - 1;
-                        }
-                        // Add tooltip
-                        if (langx.isPlainObject(settings.columns[z].displayTooltip)) {
-                            $(tbCell).tooltip(settings.columns[z].displayTooltip);
-                        }
-                        else if (!isEmpty(settings.columns[z].displayTooltip)) {
-                            $(tbCell).attr('title', settings.columns[z].displayTooltip).tooltip();
-                        }
-                        // Check to set display text or generate by function
-                        if (langx.isFunction(settings.columns[z].display)) {
-                            settings.columns[z].display(tbCell);
-                        } else if (!isEmpty(settings.columns[z].display)) {
-                            $(tbCell).text(settings.columns[z].display);
-                        }
-                        // Add column group for scrolling
-                        tbColGp.appendChild(document.createElement('col'));
-                    } else {
-                        pendingSkipCol--;
-                    }
-                }
-            }
-            // Enable columns resizable
-            if ($.fn.resizable ) {
-                $('td.resizable', tbHead).resizable({ handles: 'e' });
-            }
-            // Check to hide last column or not
-            if (settings.hideButtons.insert && settings.hideButtons.remove
-                    && settings.hideButtons.moveUp && settings.hideButtons.moveDown
-                    && (!langx.isArray(settings.customRowButtons) || settings.customRowButtons.length == 0)) {
-                settings._hideLastColumn = true;
-            }
-            // Calculate the `_finalColSpan` value
-            settings._finalColSpan = settings._visibleCount;
-            if (!settings.hideRowNumColumn) settings._finalColSpan++;
-            if (!settings._hideLastColumn) settings._finalColSpan++;
-            // Generate last column header if needed
-            if (!settings._hideLastColumn) {
-                if (settings.rowButtonsInFront) {
-                    if (settings.hideRowNumColumn) {
-                        // Insert a cell at the front
-                        tbRow.insertBefore(tbHeadCellRowButton = document.createElement('td'), tbRow.firstChild);
-                    } else {
-                        // Span the first cell that across row number and row button cells
-                        // tbHeadCellRowNum.colSpan = 2;
-                        // tbHeadCellRowButton = tbHeadCellRowNum;
-
-                        // Insert a cell as the second column
-                        tbRow.insertBefore(tbHeadCellRowButton = document.createElement('td'), tbRow.childnodes[1]);
-                    }
-                } else {
-                    tbRow.appendChild(tbHeadCellRowButton = document.createElement('td'));
-                }
-                tbHeadCellRowButton.className = 'ui-widget-header last';
-                tbHeadCellRowButton.id = settings.idPrefix + '_last_td_head';
-                // Add column group for scrolling
-                tbColGp.appendChild(document.createElement('col'));
-            }
-            // Add caption when defined
-            if (settings.caption) {
-                tbHead.insertBefore(tbRow = document.createElement('tr'), tbHead.firstChild);
-                if (settings._sectionClasses.caption) {
-                    tbRow.className = settings._sectionClasses.caption;
-                }
-                tbRow.appendChild(tbCell = document.createElement('td'));
-                tbCell.id = settings.idPrefix + '_caption_td';
-                tbCell.className = 'ui-state-active caption';
-                tbCell.colSpan = settings._finalColSpan;
-                // Add tooltip
-                if (langx.isPlainObject(settings.captionTooltip)) {
-                    $(tbCell).tooltip(settings.captionTooltip);
-                } else if (!isEmpty(settings.captionTooltip)) {
-                    $(tbCell).attr('title', settings.captionTooltip).tooltip();
-                }
-                // Check to set display text or generate by function
-                if (langx.isFunction(settings.caption)) {
-                    settings.caption(tbCell);
-                } else {
-                    $(tbCell).text(settings.caption);
-                }
-            }
-            // Handle footer row
-            tbFoot.appendChild(tbRow = document.createElement('tr'));
-            if (settings._sectionClasses.footer) {
-                tbRow.className = settings._sectionClasses.footer;
-            }
-            tbRow.appendChild(tbCell = document.createElement('td'));
-            tbCell.id = settings.idPrefix + '_footer_td';
-            tbCell.colSpan = settings._finalColSpan;
-            $('<input/>').attr({
-                type: 'hidden',
-                id: settings.idPrefix + '_rowOrder',
-                name: settings.idPrefix + '_rowOrder'
-            }).appendTo(tbCell);
-            // Make row invisible if all buttons are hidden
-            if (settings.hideButtons.append && settings.hideButtons.removeLast
-                    && (!langx.isArray(settings.customFooterButtons) || settings.customFooterButtons.length == 0)) {
-                tbRow.style.display = 'none';
-            } else {
-                if (!settings.hideButtons.append) {
-                    var button = this._createGridButton(settings.customGridButtons.append, 'ui-icon-plusthick')
-                    .attr({ title: settings._i18n.append }).addClass('append')
-                    .click(function (evt) {
-                        self._insertRow(1, null, null);
-                        if (evt && evt.preventDefault) evt.preventDefault();
-                        return false;
-                    }).appendTo(tbCell);
-                    if (!isEmpty(settings._buttonClasses.append)) button.addClass(settings._buttonClasses.append);
-                }
-                if (!settings.hideButtons.removeLast) {
-                    var button = this._createGridButton(settings.customGridButtons.removeLast, 'ui-icon-closethick')
-                    .attr({ title: settings._i18n.removeLast }).addClass('removeLast')
-                    .click(function (evt) {
-                        self._removeRow( null, this.value, false);
-                        if (evt && evt.preventDefault) evt.preventDefault();
-                        return false;
-                    }).appendTo(tbCell);
-                    if (!isEmpty(settings._buttonClasses.removeLast)) button.addClass(settings._buttonClasses.removeLast);
-                }
-                if (settings.customFooterButtons && settings.customFooterButtons.length) {
-                    // Add front buttons
-                    for (var y = settings.customFooterButtons.length - 1; y >= 0; y--) {
-                        var buttonCfg = settings.customFooterButtons[y];
-                        if (buttonCfg && buttonCfg.uiButton && buttonCfg.click && buttonCfg.atTheFront) {
-                            $(tbCell).prepend(makeCustomBottomButton(tbWhole, buttonCfg));
-                        }
-                    }
-                    // Add end buttons
-                    for (var y = 0; y < settings.customFooterButtons.length; y++) {
-                        var buttonCfg = settings.customFooterButtons[y];
-                        if (buttonCfg && buttonCfg.uiButton && buttonCfg.click && !buttonCfg.atTheFront) {
-                            $(tbCell).append(makeCustomBottomButton(tbWhole, buttonCfg));
-                        }
-                    }
-                }
-            }
-            // Enable dragging
-            if (settings.rowDragging) {
-                $(tbBody).sortable({
-                    axis: 'y',
-                    containment: tbWhole,
-                    handle: '.rowDrag',
-                    helper: function (e, tr) {
-                        var org = tr.children();
-                        var helper = tr.clone();
-                        // Fix the cell width of cloned table cell
-                        helper.children().each(function (index) {
-                            $(this).width(org.eq(index).width());
-                            // Set the value of drop down list when drag (Issue #18)
-                            var helperSelect = $('select', this);
-                            if (helperSelect.length > 0) {
-                                for (var y = 0; y < helperSelect.length; y++) {
-                                    var orgSelect = org.eq(index).find('select');
-                                    if (orgSelect.length > y) {
-                                        helperSelect[y].value = orgSelect[y].value;
-                                    }
-                                }
-                            }
-                        });
-                        return helper;
-                    },
-                    update: function (event, ui) {
-                        var uniqueIndex = ui.item[0].id.substring(ui.item[0].id.lastIndexOf('_') + 1);
-                        var tbRowIndex = ui.item[0].rowIndex - $('tr', tbHead).length;
-                        self._gridRowDragged(ui.originalPosition.top > ui.position.top, uniqueIndex, tbRowIndex);
-                    }
-                });
-            }
-            // Save options
-            $(tbWhole).data('appendGrid', settings);
-            if (langx.isArray(options.initData)) {
-                // Load data if initData is array
-                this._loadData(options.initData, true);
-            } else {
-                // Add empty rows
-                //$(tbWhole).appendGrid('appendRow', settings.initRows);
-                this.appendRow(settings.initRows);
-            }
-            // Show no rows in grid
-            if (settings._rowOrder.length == 0) {
-                this._showEmptyMessage(settings, true);
-            }
-
-            /*
-            // Calculate column width
-            if (settings.maxBodyHeight > 0) {
-                if (settings.autoColumnWidth) {
-                    this._calculateColumnWidth();
-                } else {
-                    $('table.foot', tbWrap).width($(tbWhole).width());
-                }
-            }
-            */
-        },
-
-        isReady: function () {
-            // Check the appendGrid is initialized or not
-            var settings = this._checkGridAndGetSettings( true);
-            if (settings) {
-                return true;
-            }
-            return false;
-        },
-
-        isDataLoaded: function () {
-            // Check the grid data is loaded by `load` method or `initData` parameter or not
-            var settings = this._checkGridAndGetSettings();
-            if (settings) {
-                return settings._isDataLoaded;
-            }
-            return false;
-        },
-
-        load: function (records) {
-            var settings = this._checkGridAndGetSettings();
-            if (settings) {
-                if (records != null && records.length > 0) {
-                    this._loadData(records, false);
-                } else {
-                    this._emptyGrid();
-                }
-            }
-            return this;
-        },
-
-        appendRow: function (numOfRowOrRowArray) {
-            return this.insertRow(numOfRowOrRowArray);
-        },
-
-        insertRow: function (numOfRowOrRowArray, rowIndex, callerUniqueIndex) {
-            var settings = this._checkGridAndGetSettings();
-            if (settings) {
-                if ((langx.isArray(numOfRowOrRowArray) && numOfRowOrRowArray.length > 0) || (langx.isNumeric(numOfRowOrRowArray) && numOfRowOrRowArray > 0)) {
-                    // Define variables
-                    var tbWhole = this[0];
-                    insertResult = this._insertRow(numOfRowOrRowArray, rowIndex, callerUniqueIndex);
-                    // Reorder sequence as needed
-                    if (langx.isNumeric(rowIndex) || langx.isNumeric(callerUniqueIndex)) {
-                        // Sort sequence
-                        this._sortSequence( insertResult.rowIndex);
-                        // Move focus
-                        var insertUniqueIndex = settings._rowOrder[insertResult.addedRows[0]];
-                        $('#' + settings.idPrefix + '_Insert_' + insertUniqueIndex, tbWhole).focus();
-                    }
-                }
-            }
-            return this;
-        },
-        removeRow: function (rowIndex, uniqueIndex) {
-            var settings = this._checkGridAndGetSettings();
-            if (settings && settings._rowOrder.length > 0) {
-                this._removeRow(rowIndex, uniqueIndex, true);
-            }
-            return this;
-        },
-        emptyGrid: function () {
-            var settings = this._checkGridAndGetSettings();
-            if (settings) {
-                this._emptyGrid();
-            }
-            return target;
-        },
-        moveUpRow: function (rowIndex, uniqueIndex) {
-            var settings = this._checkGridAndGetSettings(), target = this;
-            if (settings) {
-                var tbWhole = target[0], trTarget, trSwap, trAdtTarget, swapSeq, oldIndex = null;
-                var tbBody = tbWhole.getElementsByTagName('tbody')[0];
-                if (langx.isNumeric(rowIndex) && rowIndex > 0 && rowIndex < settings._rowOrder.length) {
-                    oldIndex = rowIndex;
-                    uniqueIndex = settings._rowOrder[rowIndex];
-                } else if (langx.isNumeric(uniqueIndex)) {
-                    oldIndex = findRowIndex(uniqueIndex, settings);
-                }
-                if (oldIndex != null && oldIndex > 0) {
-                    // Get row to swap
-                    trTarget = document.getElementById(settings.idPrefix + '_Row_' + uniqueIndex, tbWhole);
-                    trSwap = document.getElementById(settings.idPrefix + '_Row_' + settings._rowOrder[oldIndex - 1], tbWhole);
-                    // Get the sub panel row if used
-                    if (settings.useSubPanel) {
-                        trAdtTarget = document.getElementById(settings.idPrefix + '_SubRow_' + uniqueIndex, tbWhole);
-                    }
-                    // Remove current row
-                    tbBody.removeChild(trTarget);
-                    if (settings.useSubPanel) {
-                        tbBody.removeChild(trAdtTarget);
-                    }
-                    // Insert before the above row
-                    tbBody.insertBefore(trTarget, trSwap);
-                    if (settings.useSubPanel) {
-                        tbBody.insertBefore(trAdtTarget, trSwap);
-                    }
-                    // Update rowOrder
-                    settings._rowOrder[oldIndex] = settings._rowOrder[oldIndex - 1];
-                    settings._rowOrder[oldIndex - 1] = uniqueIndex;
-                    // Update row label
-                    swapSeq = $('td.first', trSwap).html();
-                    $('td.first', trSwap).html($('td.first', trTarget).html());
-                    $('td.first', trTarget).html(swapSeq)
-                    // Save setting
-                    this._saveSetting(settings);
-                    // Change focus
-                    $('td.last button.moveUp', trTarget).removeClass('ui-state-hover').blur();
-                    $('td.last button.moveUp', trSwap).focus();
-                    // Trigger event
-                    if (settings.afterRowSwapped) {
-                        settings.afterRowSwapped(tbWhole, oldIndex, oldIndex - 1);
-                    }
-                }
-            }
-            return target;
-        },
-        moveDownRow: function (rowIndex, uniqueIndex) {
-            var settings = this._checkGridAndGetSettings(), target = this;
-            if (settings) {
-                var tbWhole = target[0], trTarget, trSwap, trAdtSwap, swapSeq, oldIndex = null;
-                var tbBody = tbWhole.getElementsByTagName('tbody')[0];
-                if (langx.isNumeric(rowIndex) && rowIndex >= 0 && rowIndex < settings._rowOrder.length - 1) {
-                    oldIndex = rowIndex;
-                    uniqueIndex = settings._rowOrder[rowIndex];
-                } else if (langx.isNumeric(uniqueIndex)) {
-                    oldIndex = findRowIndex(uniqueIndex, settings);
-                }
-                if (oldIndex != null && oldIndex != settings._rowOrder.length - 1) {
-                    // Get row to swap
-                    trTarget = document.getElementById(settings.idPrefix + '_Row_' + uniqueIndex, tbWhole);
-                    trSwap = document.getElementById(settings.idPrefix + '_Row_' + settings._rowOrder[oldIndex + 1], tbWhole);
-                    // Get the sub panel row if used
-                    if (settings.useSubPanel) {
-                        trAdtSwap = document.getElementById(settings.idPrefix + '_SubRow_' + settings._rowOrder[oldIndex + 1], tbWhole);
-                    }
-                    // Remove current row
-                    tbBody.removeChild(trSwap);
-                    // Insert before the above row
-                    tbBody.insertBefore(trSwap, trTarget);
-                    if (settings.useSubPanel) {
-                        tbBody.insertBefore(trAdtSwap, trTarget);
-                    }
-                    // Update rowOrder
-                    settings._rowOrder[oldIndex] = settings._rowOrder[oldIndex + 1];
-                    settings._rowOrder[oldIndex + 1] = uniqueIndex;
-                    // Update row label
-                    swapSeq = $('td.first', trSwap).html();
-                    $('td.first', trSwap).html($('td.first', trTarget).html());
-                    $('td.first', trTarget).html(swapSeq)
-                    // Save setting
-                    this._saveSetting(settings);
-                    // Change focus
-                    $('td.last button.moveDown', trTarget).removeClass('ui-state-hover').blur();
-                    $('td.last button.moveDown', trSwap).focus();
-                    // Trigger event
-                    if (settings.afterRowSwapped) {
-                        settings.afterRowSwapped(tbWhole, oldIndex, oldIndex + 1);
-                    }
-                }
-            }
-            return target;
-        },
-        showColumn: function (name) {
-            var settings = this._checkGridAndGetSettings();
-            if (settings && name) {
-                // Find column index
-                var colIndex = -1, tbWhole = this[0];
-                for (var z = 0; z < settings.columns.length; z++) {
-                    if (settings.columns[z].name == name) {
-                        colIndex = z;
-                        break;
-                    }
-                }
-                // Make sure the column exist and show the column if it is invisible only
-                if (colIndex != -1 && settings.columns[colIndex].invisible) {
-                    // Change caption and footer column span
-                    settings._visibleCount++;
-                    settings._finalColSpan++;
-                    $('#' + settings.idPrefix + '_caption_td').attr('colSpan', settings._finalColSpan);
-                    $('#' + settings.idPrefix + '_footer_td').attr('colSpan', settings._finalColSpan);
-                    // Remove invisible class on each row
-                    $('#' + settings.idPrefix + '_' + name + '_td_head').removeClass('invisible');
-                    for (var z = 0; z < settings._rowOrder.length; z++) {
-                        var uniqueIndex = settings._rowOrder[z];
-                        $('#' + settings.idPrefix + '_' + name + '_td_' + uniqueIndex).removeClass('invisible');
-                        if (settings.useSubPanel) {
-                            $('#' + settings.idPrefix + '_SubRow_' + uniqueIndex).attr('colSpan', settings._visibleCount + (settings._hideLastColumn ? 0 : 1));
-                        }
-                    }
-                    // Save changes
-                    settings.columns[colIndex].invisible = false;
-                    this._saveSetting(settings);
-                }
-            }
-            return this;
-        },
-        hideColumn: function (name) {
-            var settings = this._checkGridAndGetSettings();
-            if (settings && name) {
-                // Find column index
-                var colIndex = -1, tbWhole = this[0];
-                for (var z = 0; z < settings.columns.length; z++) {
-                    if (settings.columns[z].name == name) {
-                        colIndex = z;
-                        break;
-                    }
-                }
-                // Make sure the column exist and hide the column if it is visible only
-                if (colIndex != -1 && !settings.columns[colIndex].invisible) {
-                    // Change caption and footer column span
-                    settings._visibleCount--;
-                    settings._finalColSpan--;
-                    $('#' + settings.idPrefix + '_caption_td').attr('colSpan', settings._finalColSpan);
-                    $('#' + settings.idPrefix + '_footer_td').attr('colSpan', settings._finalColSpan);
-                    // Add invisible class on each row
-                    $('#' + settings.idPrefix + '_' + name + '_td_head').addClass('invisible');
-                    for (var z = 0; z < settings._rowOrder.length; z++) {
-                        var uniqueIndex = settings._rowOrder[z];
-                        $('#' + settings.idPrefix + '_' + name + '_td_' + uniqueIndex).addClass('invisible');
-                        if (settings.useSubPanel) {
-                            $('#' + settings.idPrefix + '_SubRow_' + uniqueIndex).attr('colSpan', settings._visibleCount + (settings._hideLastColumn ? 0 : 1));
-                        }
-                    }
-                    // Save changes
-                    settings.columns[colIndex].invisible = true;
-                    this._saveSetting(settings);
-                }
-            }
-            return this;
-        },
-        isColumnInvisible: function (name) {
-            var settings = this._checkGridAndGetSettings();
-            if (settings && name) {
-                for (var z = 0; z < settings.columns.length; z++) {
-                    if (settings.columns[z].name == name) {
-                        return settings.columns[z].invisible;
-                    }
-                }
-            }
-            return null;
-        },
-        getRowCount: function () {
-            var settings = this._checkGridAndGetSettings();
-            if (settings) {
-                return settings._rowOrder.length;
-            }
-            return null;
-        },
-        getUniqueIndex: function (rowIndex) {
-            var settings = this._checkGridAndGetSettings();
-            if (settings && langx.isNumeric(rowIndex) && rowIndex < settings._rowOrder.length) {
-                return settings._rowOrder[rowIndex];
-            }
-            return null;
-        },
-        getRowIndex: function (uniqueIndex) {
-            var settings = this._checkGridAndGetSettings();
-            if (settings && langx.isNumeric(uniqueIndex)) {
-                for (var z = 0; z < settings._rowOrder.length; z++) {
-                    if (settings._rowOrder[z] == uniqueIndex) {
-                        return z;
-                    }
-                }
-            }
-            return null;
-        },
-        getRowValue: function (rowIndex, uniqueIndex, loopIndex) {
-            var settings = this._checkGridAndGetSettings(), result = null;
-            if (settings) {
-                if (langx.isNumeric(rowIndex) && rowIndex >= 0 && rowIndex < settings._rowOrder.length) {
-                    uniqueIndex = settings._rowOrder[rowIndex];
-                }
-                if (!isEmpty(uniqueIndex)) {
-                    result = getRowValue(settings, uniqueIndex, loopIndex);
-                }
-            }
-            return result;
-        },
-        getAllValue: function (objectMode) {
-            var settings = this._checkGridAndGetSettings(), result = null;
-            if (settings) {
-                // Prepare result based on objectMode setting
-                result = objectMode ? {} : [];
-                // Process on each rows
-                for (var z = 0; z < settings._rowOrder.length; z++) {
-                    if (objectMode) {
-                        rowValue = getRowValue(settings, settings._rowOrder[z], z);
-                        langx.extend(result, rowValue)
-                    } else {
-                        rowValue = getRowValue(settings, settings._rowOrder[z]);
-                        result.push(rowValue);
-                    }
-                }
-                if (objectMode) {
-                    result[settings.rowCountName] = settings._rowOrder.length;
-                }
-            }
-            return result;
-        },
-        getCtrlValue: function (name, rowIndex) {
-            var settings = this._checkGridAndGetSettings();
-            if (settings && rowIndex >= 0 && rowIndex < settings._rowOrder.length) {
-                for (var z = 0; z < settings.columns.length; z++) {
-                    if (settings.columns[z].name === name) {
-                        return getCtrlValue(settings, z, settings._rowOrder[rowIndex]);
-                    }
-                }
-            }
-            return null;
-        },
-        setCtrlValue: function (name, rowIndex, value) {
-            var settings = this._checkGridAndGetSettings();
-            if (settings && rowIndex >= 0 && rowIndex < settings._rowOrder.length) {
-                for (var z = 0; z < settings.columns.length; z++) {
-                    if (settings.columns[z].name == name) {
-                        setCtrlValue(settings, z, settings._rowOrder[rowIndex], value);
-                        break;
-                    }
-                }
-            }
-            return this;
-        },
-        getCellCtrl: function (name, rowIndex) {
-            var settings = this._checkGridAndGetSettings();
-            if (settings && rowIndex >= 0 && rowIndex < settings._rowOrder.length) {
-                var uniqueIndex = settings._rowOrder[rowIndex];
-                for (var z = 0; z < settings.columns.length; z++) {
-                    if (settings.columns[z].name === name) {
-                        return getCellCtrl(settings.columns[z].type, settings.idPrefix, name, uniqueIndex);
-                    }
-                }
-            }
-            return null;
-        },
-        getCellCtrlByUniqueIndex: function (name, uniqueIndex) {
-            var settings = this._checkGridAndGetSettings();
-            if (settings) {
-                for (var z = 0; z < settings.columns.length; z++) {
-                    if (settings.columns[z].name === name) {
-                        return getCellCtrl(settings.columns[z].type, settings.idPrefix, name, uniqueIndex);
-                    }
-                }
-            }
-            return null;
-        },
-        getRowOrder: function () {
-            var settings = this._checkGridAndGetSettings();
-            if (settings) {
-                // Return a copy of `Row Order` array
-                return settings._rowOrder.slice();
-            }
-            return null;
-        },
-        getColumns: function () {
-            var settings = this._checkGridAndGetSettings();
-            if (settings) {
-                // Return a copy of the columns array
-                return settings.columns.slice();
-            }
-            return null;
-        },
-        isRowEmpty: function (rowIndex) {
-            var settings = this._checkGridAndGetSettings();
-            if (settings) {
-                return isRowEmpty(settings, rowIndex);
-            }
-            return null;
-        },
-        removeEmptyRows: function () {
-            var settings = this._checkGridAndGetSettings();
-            if (settings) {
-                var tbWhole = this[0];
-                for (var z = settings._rowOrder.length; z >= 0; z--) {
-                    if (isRowEmpty(settings, z)) {
-                        // Remove itself
-                        this._removeRow( null, settings._rowOrder[z], true);
-                    }
-                }
-                return this;
-            }
-            return null;
-        }
-
-
-
-    });
-    // The default initial options.
-    var _defaultInitOptions = {
-        // The text as table caption, set null to disable caption generation.
-        caption: null,
-        // Tooltip for caption.
-        captionTooltip: null,
-        // The total number of empty rows generated when init the grid. This will be ignored if `initData` is assigned.
-        initRows: 3,
-        // The maximum number of rows allowed in this grid.
-        maxRowsAllowed: 0,
-        // An array of data to be filled after initialized the grid.
-        initData: null,
-        // Array of column options.
-        columns: null,
-        // Labels or messages used in grid.
-        i18n: null,
-        // The ID prefix of controls generated inside the grid. Table ID will be used if not defined.
-        idPrefix: null,
-        // Enable row dragging by using jQuery UI sortable on grid rows.
-        rowDragging: false,
-        // Hide the buttons at the end of rows or bottom of grid.
-        hideButtons: null,
-        // Hide the row number column.
-        hideRowNumColumn: false,
-        // Generate row buttom column in the front of input columns.
-        rowButtonsInFront: false,
-        // The variable name of row count used for object mode of getAllValue
-        rowCountName: '_RowCount',
-        // The extra class names for buttons.
-        buttonClasses: null,
-        // The extra class names for table sections.
-        sectionClasses: null,
-        // Custom the standard grid buttons.
-        customGridButtons: null,
-        // Adding extra button(s) at the end of rows.
-        customRowButtons: null,
-        // Adding extra button(s) at the bottom of grid.
-        customFooterButtons: null,
-        // Use the sub panel or not
-        useSubPanel: false,
-        // Maintain the scroll position after appended or removed last row.
-        maintainScroll: false,
-        // The maximum height of grid content, scroll bar will be display when the height is greater than this value.
-        maxBodyHeight: 0,
-        // Auto calculate the column width when scroll bar on table body is in use.
-        autoColumnWidth: true
-    };
-    var _defaultCallbackContainer = {
-        // The callback function for format the HTML name of generated controls.
-        nameFormatter: null,
-        // The callback function to be triggered after all data loaded to grid.
-        dataLoaded: null,
-        // The callback function to be triggered after data loaded to a row.
-        rowDataLoaded: null,
-        // The callback function to be triggered after new row appended.
-        afterRowAppended: null,
-        // The callback function to be triggered after new row inserted.
-        afterRowInserted: null,
-        // The callback function to be triggered after grid row swapped.
-        afterRowSwapped: null,
-        // The callback function to be triggered before grid row remove.
-        beforeRowRemove: null,
-        // The callback function to be triggered after grid row removed.
-        afterRowRemoved: null,
-        // The callback function to be triggered after grid row dragged.
-        afterRowDragged: null,
-        // The callback function for generating sub panel content.
-        subPanelBuilder: null,
-        // The callback function for getting values from sub panel. Used for `getAllValue` method.
-        subPanelGetter: null,
-        // The callback function to be triggered when row(s) is/are adding to grid but the maximum number of rows allowed is reached.
-        maxNumRowsReached: null
-    };
-    // Default column options.
-    var _defaultColumnOptions = {
-        // Type of column control.
-        type: 'text',
-        // Name of column.
-        name: null,
-        // Default value.
-        value: null,
-        // Display text on the header section.
-        display: null,
-        // Extra CSS setting to be added to display text.
-        displayCss: null,
-        // Tooltip for column head.
-        displayTooltip: null,
-        // The `colspan` setting on the column header.
-        headerSpan: 1,
-        // Extra CSS setting to be added to the control container table cell.
-        cellCss: null,
-        // Extra attributes to be added to the control.
-        ctrlAttr: null,
-        // Extra properties to be added to the control.
-        ctrlProp: null,
-        // Extra CSS to be added to the control.
-        ctrlCss: null,
-        // Extra name of class to be added to the control.
-        ctrlClass: null,
-        // The available option for building `select` type control.
-        ctrlOptions: null,
-        // Options for initalize jQuery UI widget.
-        uiOption: null,
-        // Options for initalize jQuery UI tooltip.
-        uiTooltip: null,
-        // Let column resizable by using jQuery UI Resizable Interaction.
-        resizable: false,
-        // Show or hide column after initialized.
-        invisible: false,
-        // The value to compare for indentify this column value is empty.
-        emptyCriteria: null,
-        // Callback function to build custom type control.
-        customBuilder: null,
-        // Callback function to get control value.
-        customGetter: null,
-        // Callback function to set control value.
-        customSetter: null,
-        // The `OnClick` event callback of control.
-        onClick: null,
-        // The `OnChange` event callback of control.
-        onChange: null
-    };
-    var _systemMessages = {
-        noColumnInfo: 'Cannot initial grid without column information!',
-        elemNotTable: 'Cannot initial grid on element other than TABLE!',
-        notInit: '`appendGrid` does not initialized',
-        getValueMultiGrid: 'Cannot get values on multiple grid',
-        notSupportMethod: 'Method is not supported by `appendGrid`: '
-    };
-    var _defaultTextResources = {
-        append: 'Append Row',
-        removeLast: 'Remove Last Row',
-        insert: 'Insert Row Above',
-        remove: 'Remove Current Row',
-        moveUp: 'Move Up',
-        moveDown: 'Move Down',
-        rowDrag: 'Sort Row',
-        rowEmpty: 'This Grid Is Empty'
-    };
-    var _defaultButtonClasses = { append: null, removeLast: null, insert: null, remove: null, moveUp: null, moveDown: null, rowDrag: null };
-    var _defaultSectionClasses = { caption: null, header: null, body: null, subPanel: null, footer: null };
-    var _defaultHideButtons = { append: false, removeLast: false, insert: false, remove: false, moveUp: false, moveDown: false };
-
-
-    function makeCustomBottomButton(tbWhole, buttonCfg) {
-        var exButton = $('<button/>').attr({ type: 'button', tabindex: -1 })
-        .button(buttonCfg.uiButton).click({ tbWhole: tbWhole }, buttonCfg.click);
-        if (buttonCfg.btnClass) exButton.addClass(buttonCfg.btnClass);
-        if (buttonCfg.btnCss) exButton.css(buttonCfg.btnCss);
-        if (buttonCfg.btnAttr) exButton.attr(buttonCfg.btnAttr);
-        return exButton;
-    }
-    function makeCustomRowButton(tbWhole, buttonCfg, uniqueIndex) {
-        var exButton = $('<button/>').val(uniqueIndex).attr({ type: 'button', tabindex: -1 })
-        .button(buttonCfg.uiButton).click({ tbWhole: tbWhole, uniqueIndex: uniqueIndex }, function (evt) {
-            var rowData = $(evt.data.tbWhole).plugin("lark.tabular").getRowValue(null, evt.data.uniqueIndex);
-            buttonCfg.click(evt, evt.data.uniqueIndex, rowData);
-        });
-        if (buttonCfg.btnClass) exButton.addClass(buttonCfg.btnClass);
-        if (buttonCfg.btnCss) exButton.css(buttonCfg.btnCss);
-        if (buttonCfg.btnAttr) exButton.attr(buttonCfg.btnAttr);
-        return exButton;
-    }
-
-
-
-
-    function findRowIndex(uniqueIndex, settings) {
-        for (var z = 0; z < settings._rowOrder.length; z++) {
-            if (settings._rowOrder[z] == uniqueIndex) {
-                return z;
-            }
-        }
-        return null;
-    }
-    function isEmpty(value) {
-        return typeof (value) == 'undefined' || value == null;
-    }
-    function getObjValue(obj, key) {
-        if (!isEmpty(obj) && langx.isPlainObject(obj) && !isEmpty(obj[key])) {
-            return obj[key];
-        }
-        return null;
-    }
-    function getRowIndex(settings, uniqueIndex) {
-        var rowIndex = null;
-        for (var z = 0; z < settings._rowOrder.length; z++) {
-            if (settings._rowOrder[z] == uniqueIndex) {
-                return z;
-            }
-        }
-        return rowIndex;
-    }
-    function getRowValue(settings, uniqueIndex, loopIndex) {
-        var result = {}, keyName = null, suffix = (isEmpty(loopIndex) ? '' : '_' + loopIndex);
-        for (var z = 0; z < settings.columns.length; z++) {
-            keyName = settings.columns[z].name + suffix;
-            result[keyName] = getCtrlValue(settings, z, uniqueIndex);
-        }
-        // Merge control values from sub panel if getter method defined
-        if (settings.useSubPanel && langx.isFunction(settings.subPanelGetter)) {
-            var adtData = settings.subPanelGetter(uniqueIndex);
-            if (langx.isPlainObject(adtData)) {
-                if (suffix == '') {
-                    // Extend to row data directly for array mode
-                    langx.extend(result, adtData);
-                } else {
-                    // For returning values in object mode, add suffix to all keys
-                    var newData = {};
-                    for (var key in adtData) {
-                        newData[key + suffix] = adtData[key];
-                    }
-                    langx.extend(result, newData);
-                }
-            }
-        }
-        return result;
-    }
-    function getCtrlValue(settings, colIndex, uniqueIndex) {
-        var type = settings.columns[colIndex].type, columnName = settings.columns[colIndex].name;
-        if (type == 'custom') {
-            if (langx.isFunction(settings.columns[colIndex].customGetter)) {
-                return settings.columns[colIndex].customGetter(settings.idPrefix, columnName, uniqueIndex);
-            } else {
-                return null;
-            }
-        } else {
-            var ctrl = getCellCtrl(type, settings.idPrefix, columnName, uniqueIndex);
-            if (ctrl == null) {
-                return null;
-            }
-            else if (type == 'checkbox') {
-                return ctrl.checked ? 1 : 0;
-            } else {
-                return $(ctrl).val();
-            }
-        }
-    }
-    function getCellCtrl(type, idPrefix, columnName, uniqueIndex) {
-        return document.getElementById(idPrefix + '_' + columnName + '_' + uniqueIndex);
-    }
-    function setCtrlValue(settings, colIndex, uniqueIndex, data) {
-        var type = settings.columns[colIndex].type;
-        var columnName = settings.columns[colIndex].name;
-        // Handle values by type
-        if (type == 'custom') {
-            if (langx.isFunction(settings.columns[colIndex].customSetter)) {
-                settings.columns[colIndex].customSetter(settings.idPrefix, columnName, uniqueIndex, data);
-            } else {
-                // `customSetter` is not a function?? Skip handling...
-            }
-        } else {
-            var element = getCellCtrl(type, settings.idPrefix, columnName, uniqueIndex);
-            if (type == 'checkbox') {
-                element.checked = (data != null && data != 0);
-            } else if (type == 'ui-selectmenu') {
-                element.value = (data == null ? '' : data);
-                $(element).selectmenu('refresh');
-            }
-            else {
-                $(element).val(data == null ? '' : data);
-            }
-        }
-    }
-
-
-    function isRowEmpty(settings, rowIndex) {
-        for (var z = 0; z < settings.columns.length; z++) {
-            var uniqueIndex = settings._rowOrder[rowIndex];
-            var currentValue = getCtrlValue(settings, z, uniqueIndex);
-            // Check the empty criteria is function
-            if (langx.isFunction(settings.columns[z].emptyCriteria)) {
-                if (!settings.columns[z].emptyCriteria(currentValue)) {
-                    return false;
-                }
-            } else {
-                // Find the default value
-                var defaultValue = null;
-                if (!isEmpty(settings.columns[z].emptyCriteria)) {
-                    defaultValue = settings.columns[z].emptyCriteria;
-                } else {
-                    // Check default value based on its type
-                    if (settings.columns[z].type == 'checkbox') {
-                        defaultValue = 0;
-                    } else if (settings.columns[z].type == 'select' || settings.columns[z].type == 'ui-selectmenu') {
-                        var options = getCellCtrl(settings.columns[z].type, settings.idPrefix, settings.columns[z].name, uniqueIndex).options;
-                        if (options.length > 0) {
-                            defaultValue = options[0].value;
-                        } else {
-                            defaultValue = '';
-                        }
-                    } else {
-                        defaultValue = '';
-                    }
-                }
-                // Compare with the default value
-                if (currentValue != defaultValue) {
-                    return false;
-                }
-            }
-        }
-        return true;
-    }
-
-
-    /*
-    /// <summary>
-    /// Initialize append grid or calling its methods.
-    /// </summary>
-    $.fn.appendGrid = function (params) {
-        if (_methods[params]) {
-            return _methods[params].apply(this, Array.prototype.slice.call(arguments, 1));
-        } else if (typeof (params) === 'object' || !params) {
-            return _methods.init.apply(this, arguments);
-        } else {
-            alert(_systemMessages.notSupportMethod + params);
-        }
-    };
-    */
-
-    return Tabular ;
-});
-
-define('skylark-widgets-swt/TabStrip',[
-    "skylark-langx/langx",
-    "skylark-domx-browser",
-    "skylark-domx-eventer",
-    "skylark-domx-noder",
-    "skylark-domx-geom",
-    "skylark-domx-query",
-    "./swt",
-    "./Widget",
-    "skylark-bootstrap3/tab",
-    "skylark-bootstrap3/dropdown"
-], function(langx, browser, eventer, noder, geom,  $, swt, Widget) {
-
-    var TabStrip = Widget.inherit({
-        klassName : "TabStrip",
-        pluginName : "lark.tabstrip",
-
-        options : {
-          selectors : {
-            header : ".nav-tabs",
-            tab : "[data-toggle=\"tab\"]",
-            content : ".tab-content",
-            tabpane : ".tab-pane"
-          },
-
-          droptabs : {
-            selectors : {
-              dropdown : "li.droptabs",
-              dropdownMenu    : "ul.dropdown-menu",
-              dropdownTabs    : "li",
-              dropdownCaret   : "b.caret",
-              visibleTabs     : ">li:not(.dropdown)",
-            },
-            auto              : true,
-            pullDropdownRight : true,
-
-
-          }
-        },
-
-        _init : function() {
-          this.$header = this._velm.$(this.options.selectors.header); 
-          this.$tabs = this.$header.find(this.options.selectors.tab);
-          this.$content = this._velm.$(this.options.selectors.content);
-          this.$tabpanes = this.$content.find(this.options.selectors.tabpane);
-
-          this.$header.find('[data-toggle="dropdown"]').dropdown();
-
-          var self = this;
-          this.$tabs.each(function(idx,tabEl){
-            $(tabEl).tab({
-              target : self.$tabpanes[idx]
-            });
-          });
-
-        },
-
-        arrange : function () {
-
-          var dropdownTabsSelector = this.options.droptabs.selectors.dropdownTabs,
-              visibleTabsSelector = this.options.droptabs.selectors.visibleTabs;
-
-              $container = this.$header;
-          var dropdown = $container.find(this.options.droptabs.selectors.dropdown);
-          var dropdownMenu = dropdown.find(this.options.droptabs.selectors.dropdownMenu);
-          var dropdownLabel = $('>a', dropdown).clone();
-          var dropdownCaret = $(this.options.droptabs.selectors.dropdownCaret, dropdown);
-
-          // We only want the default label, strip the caret out
-          $(this.options.droptabs.selectors.dropdownCaret, dropdownLabel).remove();
-
-          if (this.options.droptabs.pullDropdownRight) {
-            $(dropdown).addClass('pull-right');
-          }
-
-          var $dropdownTabs = function () {
-            return $(dropdownTabsSelector, dropdownMenu);
-          }
-
-          var $visibleTabs = function () {
-            return $(visibleTabsSelector, $container);
-          }
-
-          function getFirstHiddenElementWidth() {
-            var tempElem=$dropdownTabs().first().clone().appendTo($container).css("position","fixed");
-            var hiddenElementWidth = $(tempElem).outerWidth();
-            $(tempElem).remove();
-            return hiddenElementWidth;
-          }
-
-          function getHiddenElementWidth(elem) {
-            var tempElem=$(elem).clone().appendTo($container).css("position","fixed");
-            var hiddenElementWidth = $(tempElem).outerWidth();
-            $(tempElem).remove();
-            return hiddenElementWidth;
-          }
-
-          function getDropdownLabel() {
-            var labelText = 'Dropdown';
-            if ($(dropdown).hasClass('active')) {
-              labelText = $('>li.active>a', dropdownMenu).html();
-            } else if (dropdownLabel.html().length > 0) {
-              labelText = dropdownLabel.html();
-            }
-
-            labelText = $.trim(labelText);
-
-            if (labelText.length > 10) {
-              labelText = labelText.substring(0, 10) + '...';
-            }
-
-            return labelText;
-          }
-
-          function renderDropdownLabel() {
-            $('>a', dropdown).html(getDropdownLabel() + ' ' + dropdownCaret.prop('outerHTML'));
-          }
-
-          function manageActive(elem) {
-            //fixes a bug where Bootstrap can't remove the 'active' class on elements after they've been hidden inside the dropdown
-            $('a', $(elem)).on('show.bs.tab', function (e) {
-              $(e.relatedTarget).parent().removeClass('active');
-            })
-            $('a', $(elem)).on('shown.bs.tab', function (e) {
-              renderDropdownLabel();
-            })
-
-          }
-
-          function checkDropdownSelection() {
-            if ($($dropdownTabs()).filter('.active').length > 0) {
-              $(dropdown).addClass('active');
-            } else {
-              $(dropdown).removeClass('active');
-            }
-
-            renderDropdownLabel();
-          }
-
-
-          var visibleTabsWidth = function () {
-            var visibleTabsWidth = 0;
-            $($visibleTabs()).each(function( index ) {
-              visibleTabsWidth += parseInt($(this).outerWidth(), 10);
-            });
-            visibleTabsWidth = visibleTabsWidth + parseInt($(dropdown).outerWidth(), 10);
-            return visibleTabsWidth;
-          }
-
-          var availableSpace = function () {
-            return $container.outerWidth()-visibleTabsWidth();
-          }
-
-          if (availableSpace()<0) {//we will hide tabs here
-            var x = availableSpace();
-            $($visibleTabs().get().reverse()).each(function( index ){
-              if (!($(this).hasClass('always-visible'))){
-                  $(this).prependTo(dropdownMenu);
-                  x=x+$(this).outerWidth();
-              }
-              if (x>=0) {return false;}
-            });
-          }
-
-          if (availableSpace()>getFirstHiddenElementWidth()) { //and here we bring the tabs out
-            var x = availableSpace();
-            $($dropdownTabs()).each(function( index ){
-              if (getHiddenElementWidth(this) < x && !($(this).hasClass('always-dropdown'))){
-                $(this).appendTo($container);
-                x = x-$(this).outerWidth();
-              } else {return false;}
-             });
-
-            if (!this.options.droptabs.pullDropdownRight && !$(dropdown).is(':last-child')) {
-              // If not pulling-right, keep the dropdown at the end of the container.
-              $(dropdown).detach().insertAfter($container.find('li:last-child'));
-            }
-          }
-
-          if ($dropdownTabs().length <= 0) {
-            dropdown.hide();
-          } else {
-            dropdown.show();
-          }
-        },
-
-        add : function() {
-          //TODO
-        },
-
-        remove : function(){
-          //TODO
-        }
-    });
-
-
-
-
-
-    return swt.TabStrip = TabStrip;
-
-});
-define('skylark-widgets-swt/Toolbar',[
-  "skylark-langx/langx",
-  "skylark-domx-query",
-  "skylark-widgets-base/Widget"
-],function(langx,$,Widget){ 
-
-
-
-  var Toolbar = Widget.inherit({
-    pluginName : "lark.toolbar",
-
-    options : {
-      toolbarFloat: true,
-      toolbarHidden: false,
-      toolbarFloatOffset: 0,
-      template : '<div class="lark-toolbar"><ul></ul></div>',
-      separator : {
-        template :  '<li><span class="separator"></span></li>'
-      }
-    },
-
-    _init : function() {
-      var floatInitialized, initToolbarFloat, toolbarHeight;
-      //this.editor = editor;
-
-      //this.opts = langx.extend({}, this.opts, opts);
-      this.opts = this.options;
-
-
-      //if (!langx.isArray(this.opts.toolbar)) {
-      //  this.opts.toolbar = ['bold', 'italic', 'underline', 'strikethrough', '|', 'ol', 'ul', 'blockquote', 'code', '|', 'link', 'image', '|', 'indent', 'outdent'];
-      //}
-
-      this.wrapper = $(this._elm);
-      this.list = this.wrapper.find('ul');
-      this.list.on('click', function(e) {
-        return false;
-      });
-      this.wrapper.on('mousedown', (function(_this) {
-        return function(e) {
-          return _this.list.find('.menu-on').removeClass('.menu-on');
-        };
-      })(this));
-      $(document).on('mousedown.toolbar', (function(_this) {
-        return function(e) {
-          return _this.list.find('.menu-on').removeClass('menu-on');
-        };
-      })(this));
-      if (!this.opts.toolbarHidden && this.opts.toolbarFloat) {
-        this.wrapper.css('top', this.opts.toolbarFloatOffset);
-        toolbarHeight = 0;
-        initToolbarFloat = (function(_this) {
-          return function() {
-            _this.wrapper.css('position', 'static');
-            _this.wrapper.width('auto');
-            _this.editor.editable.util.reflow(_this.wrapper);
-            _this.wrapper.width(_this.wrapper.outerWidth());
-            _this.wrapper.css('left', _this.editor.editable.util.os.mobile ? _this.wrapper.position().left : _this.wrapper.offset().left);
-            _this.wrapper.css('position', '');
-            toolbarHeight = _this.wrapper.outerHeight();
-            _this.editor.placeholderEl.css('top', toolbarHeight);
-            return true;
-          };
-        })(this);
-        floatInitialized = null;
-
-        /*
-        $(window).on('resize.richeditor-' + this.editor.id, function(e) {
-          return floatInitialized = initToolbarFloat();
-        });
-        $(window).on('scroll.richeditor-' + this.editor.id, (function(_this) {
-          return function(e) {
-            var bottomEdge, scrollTop, topEdge;
-            if (!_this.wrapper.is(':visible')) {
-              return;
-            }
-            topEdge = _this.editor.wrapper.offset().top;
-            bottomEdge = topEdge + _this.editor.wrapper.outerHeight() - 80;
-            scrollTop = $(document).scrollTop() + _this.opts.toolbarFloatOffset;
-            if (scrollTop <= topEdge || scrollTop >= bottomEdge) {
-              _this.editor.wrapper.removeClass('toolbar-floating').css('padding-top', '');
-              if (_this.editor.editable.util.os.mobile) {
-                return _this.wrapper.css('top', _this.opts.toolbarFloatOffset);
-              }
-            } else {
-              floatInitialized || (floatInitialized = initToolbarFloat());
-              _this.editor.wrapper.addClass('toolbar-floating').css('padding-top', toolbarHeight);
-              if (_this.editor.editable.util.os.mobile) {
-                return _this.wrapper.css('top', scrollTop - topEdge + _this.opts.toolbarFloatOffset);
-              }
-            }
-          };
-        })(this));
-        */
-      }
-
-      /*
-      this.editor.on('destroy', (function(_this) {
-        return function() {
-          return _this.buttons.length = 0;
-        };
-      })(this));
-      */
-
-      
-    },
-
-    addToolItem : function(itemWidget) {
-      $(itemWidget._elm).appendTo(this.list);
-      return this;
-    },
-
-    addSeparator : function() {
-      $(this.options.separator.template).appendTo(this.list);
-      return this;
-    }
-
-  });
-
-
-  return Toolbar;
-
-});
-define('skylark-widgets-swt/main',[
-    "./swt",
-    "./Widget",
-    "./Accordion",
-    "./Button",
-    "./Carousel",
-    "./CheckBox",
-    "./ComboBox",
-    "./TextBox",
-    "./Listing",
-    "./Pagination",
-    "./Progress",
-    "./Radio",
-    "./SearchBox",
-    "./SelectList",
-    "./Tabular",
-    "./TabStrip",
-    "./TextBox",
-    "./Toolbar"
-], function(swt) {
-    return swt;
-});
-define('skylark-widgets-swt', ['skylark-widgets-swt/main'], function (main) { return main; });
-
 define('skylark-widgets-shells/main',[
 	"./shells",
 	"./Shell",
-	"skylark-bootstrap3",
-	"skylark-widgets-swt",
-	"skylark-visibility"
+	"skylark-bootstrap3"
 ],function(shells){
 	return shells;
 });

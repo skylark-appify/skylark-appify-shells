@@ -1,9 +1,7 @@
 define([
 	"./shells",
 	"./Shell",
-	"skylark-bootstrap3",
-	"skylark-widgets-swt",
-	"skylark-visibility"
+	"skylark-bootstrap3"
 ],function(shells){
 	return shells;
 })

@@ -98,11 +98,11 @@ define('skylark-widgets-shells/Shell',[
 	"skylark-domx-scripter",
 	"skylark-domx-finder",
 	"skylark-domx-query",
-	"skylark-widgets-swt/Widget",
+	"skylark-widgets-base/Widget",
 	"skylark-nprogress",
 	"skylark-bootbox4",
     "skylark-visibility",
-  "skylark-tinycon",
+    "skylark-tinycon",
 	"./shells"
 ],function(langx, css, scripter, finder,$,Widget,nprogress,bootbox,Visibility, Tinycon,shells){
 	function createAlert(params,template) {
@@ -446,9 +446,7 @@ define('skylark-widgets-shells/Shell',[
 define('skylark-widgets-shells/main',[
 	"./shells",
 	"./Shell",
-	"skylark-bootstrap3",
-	"skylark-widgets-swt",
-	"skylark-visibility"
+	"skylark-bootstrap3"
 ],function(shells){
 	return shells;
 });

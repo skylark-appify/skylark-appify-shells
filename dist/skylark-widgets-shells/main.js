@@ -5,5 +5,5 @@
  * @link https://github.com/skylark-widgets/skylark-widgets-shells/
  * @license MIT
  */
-define(["./shells","./Shell","skylark-bootstrap3","skylark-widgets-swt","skylark-visibility"],function(s){return s});
+define(["./shells","./Shell","skylark-bootstrap3"],function(e){return e});
 //# sourceMappingURL=sourcemaps/main.js.map
