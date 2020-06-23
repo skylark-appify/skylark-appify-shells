@@ -2683,10 +2683,114 @@ define('skylark-langx-events/events',[
 ],function(skylark){
 	return skylark.attach("langx.events",{});
 });
+define('skylark-langx-hoster/hoster',[
+    "skylark-langx-ns"
+],function(skylark){
+	// The javascript host environment, brower and nodejs are supported.
+	var hoster = {
+		"isBrowser" : true, // default
+		"isNode" : null,
+		"global" : this,
+		"browser" : null,
+		"node" : null
+	};
+
+	if (typeof process == "object" && process.versions && process.versions.node && process.versions.v8) {
+		hoster.isNode = true;
+		hoster.isBrowser = false;
+	}
+
+	hoster.global = (function(){
+		if (typeof global !== 'undefined' && typeof global !== 'function') {
+			// global spec defines a reference to the global object called 'global'
+			// https://github.com/tc39/proposal-global
+			// `global` is also defined in NodeJS
+			return global;
+		} else if (typeof window !== 'undefined') {
+			// window is defined in browsers
+			return window;
+		}
+		else if (typeof self !== 'undefined') {
+			// self is defined in WebWorkers
+			return self;
+		}
+		return this;
+	})();
+
+	var _document = null;
+
+	Object.defineProperty(hoster,"document",function(){
+		if (!_document) {
+			var w = typeof window === 'undefined' ? require('html-element') : window;
+			_document = w.document;
+		}
+
+		return _document;
+	});
+
+	if (hoster.global.CustomEvent === undefined) {
+		hoster.global.CustomEvent = function(type,props) {
+			this.type = type;
+			this.props = props;
+		};
+	}
+	Object.defineProperty(hoster,"document",function(){
+		if (!_document) {
+			var w = typeof window === 'undefined' ? require('html-element') : window;
+			_document = w.document;
+		}
+
+		return _document;
+	});
+
+	if (hoster.isBrowser) {
+	    function uaMatch( ua ) {
+		    ua = ua.toLowerCase();
+
+		    var match = /(chrome)[ \/]([\w.]+)/.exec( ua ) ||
+		      /(webkit)[ \/]([\w.]+)/.exec( ua ) ||
+		      /(opera)(?:.*version|)[ \/]([\w.]+)/.exec( ua ) ||
+		      /(msie) ([\w.]+)/.exec( ua ) ||
+		      ua.indexOf('compatible') < 0 && /(mozilla)(?:.*? rv:([\w.]+)|)/.exec( ua ) ||
+		      [];
+
+		    return {
+		      browser: match[ 1 ] || '',
+		      version: match[ 2 ] || '0'
+		    };
+	  	};
+
+	    var matched = uaMatch( navigator.userAgent );
+
+	    var browser = hoster.browser = {};
+
+	    if ( matched.browser ) {
+	      browser[ matched.browser ] = true;
+	      browser.version = matched.version;
+	    }
+
+	    // Chrome is Webkit, but Webkit is also Safari.
+	    if ( browser.chrome ) {
+	      browser.webkit = true;
+	    } else if ( browser.webkit ) {
+	      browser.safari = true;
+	    }
+	}
+
+	return  skylark.attach("langx.hoster",hoster);
+});
+define('skylark-langx-hoster/main',[
+	"./hoster"
+],function(hoster){
+	return hoster;
+});
+define('skylark-langx-hoster', ['skylark-langx-hoster/main'], function (main) { return main; });
+
 define('skylark-langx-events/Event',[
   "skylark-langx-objects",
   "skylark-langx-funcs",
   "skylark-langx-klass",
+  "skylark-langx-hoster"
 ],function(objects,funcs,klass){
     var eventMethods = {
         preventDefault: "isDefaultPrevented",
@@ -3130,94 +3234,6 @@ define('skylark-langx/funcs',[
 ],function(funcs){
     return funcs;
 });
-define('skylark-langx-hoster/hoster',[
-    "skylark-langx-ns"
-],function(skylark){
-	// The javascript host environment, brower and nodejs are supported.
-	var hoster = {
-		"isBrowser" : true, // default
-		"isNode" : null,
-		"global" : this,
-		"browser" : null,
-		"node" : null
-	};
-
-	if (typeof process == "object" && process.versions && process.versions.node && process.versions.v8) {
-		hoster.isNode = true;
-		hoster.isBrowser = false;
-	}
-
-	hoster.global = (function(){
-		if (typeof global !== 'undefined' && typeof global !== 'function') {
-			// global spec defines a reference to the global object called 'global'
-			// https://github.com/tc39/proposal-global
-			// `global` is also defined in NodeJS
-			return global;
-		} else if (typeof window !== 'undefined') {
-			// window is defined in browsers
-			return window;
-		}
-		else if (typeof self !== 'undefined') {
-			// self is defined in WebWorkers
-			return self;
-		}
-		return this;
-	})();
-
-	var _document = null;
-
-	Object.defineProperty(hoster,"document",function(){
-		if (!_document) {
-			var w = typeof window === 'undefined' ? require('html-element') : window;
-			_document = w.document;
-		}
-
-		return _document;
-	});
-
-	if (hoster.isBrowser) {
-	    function uaMatch( ua ) {
-		    ua = ua.toLowerCase();
-
-		    var match = /(chrome)[ \/]([\w.]+)/.exec( ua ) ||
-		      /(webkit)[ \/]([\w.]+)/.exec( ua ) ||
-		      /(opera)(?:.*version|)[ \/]([\w.]+)/.exec( ua ) ||
-		      /(msie) ([\w.]+)/.exec( ua ) ||
-		      ua.indexOf('compatible') < 0 && /(mozilla)(?:.*? rv:([\w.]+)|)/.exec( ua ) ||
-		      [];
-
-		    return {
-		      browser: match[ 1 ] || '',
-		      version: match[ 2 ] || '0'
-		    };
-	  	};
-
-	    var matched = uaMatch( navigator.userAgent );
-
-	    var browser = hoster.browser = {};
-
-	    if ( matched.browser ) {
-	      browser[ matched.browser ] = true;
-	      browser.version = matched.version;
-	    }
-
-	    // Chrome is Webkit, but Webkit is also Safari.
-	    if ( browser.chrome ) {
-	      browser.webkit = true;
-	    } else if ( browser.webkit ) {
-	      browser.safari = true;
-	    }
-	}
-
-	return  skylark.attach("langx.hoster",hoster);
-});
-define('skylark-langx-hoster/main',[
-	"./hoster"
-],function(hoster){
-	return hoster;
-});
-define('skylark-langx-hoster', ['skylark-langx-hoster/main'], function (main) { return main; });
-
 define('skylark-langx/hoster',[
 	"skylark-langx-hoster"
 ],function(hoster){
@@ -16527,7 +16543,7 @@ define('skylark-domx-spy/Affix',[
   // AFFIX CLASS DEFINITION
   // ======================
 
-  var Affix = spy.Affix = plugins.Plugin.inherit({
+  var Affix = plugins.Plugin.inherit({
         klassName: "Affix",
 
         pluginName : "domx.affix",
@@ -17367,78 +17383,19 @@ define('skylark-bootstrap3/carousel',[
     return Carousel;
 
 });
-define('skylark-domx-panels/panels',[
-  "skylark-langx/skylark",
-  "skylark-langx/langx",
-  "skylark-domx-browser",
-  "skylark-domx-eventer",
-  "skylark-domx-noder",
-  "skylark-domx-geom",
-  "skylark-domx-query"
-],function(skylark,langx,browser,eventer,noder,geom,$){
-	var panels = {};
-
-	var CONST = {
-		BACKSPACE_KEYCODE: 8,
-		COMMA_KEYCODE: 188, // `,` & `<`
-		DELETE_KEYCODE: 46,
-		DOWN_ARROW_KEYCODE: 40,
-		ENTER_KEYCODE: 13,
-		TAB_KEYCODE: 9,
-		UP_ARROW_KEYCODE: 38
-	};
-
-	var isShiftHeld = function isShiftHeld (e) { return e.shiftKey === true; };
-
-	var isKey = function isKey (keyCode) {
-		return function compareKeycodes (e) {
-			return e.keyCode === keyCode;
-		};
-	};
-
-	var isBackspaceKey = isKey(CONST.BACKSPACE_KEYCODE);
-	var isDeleteKey = isKey(CONST.DELETE_KEYCODE);
-	var isTabKey = isKey(CONST.TAB_KEYCODE);
-	var isUpArrow = isKey(CONST.UP_ARROW_KEYCODE);
-	var isDownArrow = isKey(CONST.DOWN_ARROW_KEYCODE);
-
-	var ENCODED_REGEX = /&[^\s]*;/;
-	/*
-	 * to prevent double encoding decodes content in loop until content is encoding free
-	 */
-	var cleanInput = function cleanInput (questionableMarkup) {
-		// check for encoding and decode
-		while (ENCODED_REGEX.test(questionableMarkup)) {
-			questionableMarkup = $('<i>').html(questionableMarkup).text();
-		}
-
-		// string completely decoded now encode it
-		return $('<i>').text(questionableMarkup).html();
-	};
-
-	langx.mixin(panels, {
-		CONST: CONST,
-		cleanInput: cleanInput,
-		isBackspaceKey: isBackspaceKey,
-		isDeleteKey: isDeleteKey,
-		isShiftHeld: isShiftHeld,
-		isTabKey: isTabKey,
-		isUpArrow: isUpArrow,
-		isDownArrow: isDownArrow
-	});
-
-	return skylark.attach("domx.panels",panels);
-
+define('skylark-domx-toggles/toggles',[
+	"skylark-langx/skylark"
+],function(skylark){
+	return skylark.attach("domx.toggles",{});
 });
-
-define('skylark-domx-panels/Collapse',[
+define('skylark-domx-toggles/Collapsable',[
     "skylark-langx/langx",
     "skylark-domx-browser",
     "skylark-domx-eventer",
     "skylark-domx-query",
     "skylark-domx-plugins",
-    "./panels"
-], function(langx, browser, eventer,  $, plugins, panels) {
+    "./toggles"
+], function(langx, browser, eventer,  $, plugins, toggles) {
 
 
   'use strict';
@@ -17446,10 +17403,10 @@ define('skylark-domx-panels/Collapse',[
   // COLLAPSE PUBLIC CLASS DEFINITION
   // ================================
 
-  var Collapse =  plugins.Plugin.inherit({
-    klassName: "Collapse",
+  var Collapsable =  plugins.Plugin.inherit({
+    klassName: "Collapsable",
 
-    pluginName : "domx.collapse",
+    pluginName : "domx.toggles.collapsable",
 
     options : {
       toggle: true
@@ -17485,7 +17442,7 @@ define('skylark-domx-panels/Collapse',[
       }
 
       //var activesData;
-      //var actives = this.$parent && this.$parent.children('.panel').children('.in, .collapsing')
+      //var actives = this.$parent && this.$parent.children('.collapsable').children('.in, .collapsing')
 
       //if (actives && actives.length) {
       //  activesData = actives.data('collapse')
@@ -17532,7 +17489,7 @@ define('skylark-domx-panels/Collapse',[
 
       this.$element
         .one('transitionEnd', langx.proxy(complete, this))
-        .emulateTransitionEnd(Collapse.TRANSITION_DURATION)[dimension](this.$element[0][scrollSize]);
+        .emulateTransitionEnd(Collapsable.TRANSITION_DURATION)[dimension](this.$element[0][scrollSize]);
     },
 
     hide : function () {
@@ -17576,7 +17533,7 @@ define('skylark-domx-panels/Collapse',[
       this.$element
         [dimension](0)
         .one('transitionEnd', langx.proxy(complete, this))
-        .emulateTransitionEnd(Collapse.TRANSITION_DURATION)
+        .emulateTransitionEnd(Collapsable.TRANSITION_DURATION)
     },
 
     toggle : function () {
@@ -17605,7 +17562,7 @@ define('skylark-domx-panels/Collapse',[
     */
   });
 
-  Collapse.TRANSITION_DURATION = 350;
+  Collapsable.TRANSITION_DURATION = 350;
 
   /*
   function getTargetFromTrigger($trigger) {
@@ -17617,9 +17574,9 @@ define('skylark-domx-panels/Collapse',[
   }
   */
 
-  plugins.register(Collapse);
+  plugins.register(Collapsable);
 
-  return Collapse;
+  return toggles.Collapsable = Collapsable;
 
 });
 
@@ -17631,7 +17588,7 @@ define('skylark-bootstrap3/collapse',[
     "skylark-domx-geom",
     "skylark-domx-query",
     "skylark-domx-plugins",
-    "skylark-domx-panels/Collapse",
+    "skylark-domx-toggles/Collapsable",
    "./bs3",
     "./transition"
 ], function(langx, browser, eventer, noder, geom, $, plugins,_Collapse, bs3) {
@@ -19433,7 +19390,7 @@ define('skylark-bootstrap3/scrollspy',[
 
 });
 
-define('skylark-domx-panels/Tab',[
+define('skylark-domx-toggles/TabButton',[
   "skylark-langx/langx",
   "skylark-domx-browser",
   "skylark-domx-eventer",
@@ -19441,8 +19398,8 @@ define('skylark-domx-panels/Tab',[
   "skylark-domx-geom",
   "skylark-domx-query",
   "skylark-domx-plugins",
-  "./panels"
-],function(langx,browser,eventer,noder,geom,$,plugins,panels){
+  "./toggles"
+],function(langx,browser,eventer,noder,geom,$,plugins,toggles){
 
   'use strict';
 
@@ -19450,10 +19407,10 @@ define('skylark-domx-panels/Tab',[
   // ====================
 
 
-  var Tab =  plugins.Plugin.inherit({
-    klassName: "Tab",
+  var TabButton =  plugins.Plugin.inherit({
+    klassName: "TabButton",
 
-    pluginName : "domx.tab",
+    pluginName : "domx.toggles.tabButton",
 
     _construct : function(element,options) {
       // jscs:disable requireDollarBeforejQueryAssignment
@@ -19461,7 +19418,7 @@ define('skylark-domx-panels/Tab',[
       this.target = options && options.target;
 
       // jscs:enable requireDollarBeforejQueryAssignment
-      this.element.on("click.bs.tab.data-api",langx.proxy(function(e){
+      this.element.on("click.domx.toggles.tabButton",langx.proxy(function(e){
         e.preventDefault()
         this.show();
       },this));    
@@ -19549,7 +19506,7 @@ define('skylark-domx-panels/Tab',[
       $active.length && transition ?
         $active
           .one('transitionEnd', next)
-          .emulateTransitionEnd(Tab.TRANSITION_DURATION) :
+          .emulateTransitionEnd(TabButton.TRANSITION_DURATION) :
         next()
 
       $active.removeClass('in')
@@ -19559,17 +19516,17 @@ define('skylark-domx-panels/Tab',[
   });
 
 
-  Tab.TRANSITION_DURATION = 150
+  TabButton.TRANSITION_DURATION = 150
 
 
-  plugins.register(Tab);
+  plugins.register(TabButton);
 
-  return panels.Tab = Tab;
+  return toggles.TabButton = TabButton;
 });
 
 define('skylark-bootstrap3/tab',[
   "skylark-domx-plugins",
-  "skylark-domx-panels/Tab",
+  "skylark-domx-toggles/TabButton",
   "./bs3"
 ],function(plugins,_Tab,bs3){
 
