@@ -4,13 +4,13 @@ define([
 	"skylark-domx-scripter",
 	"skylark-domx-finder",
 	"skylark-domx-query",
-	"skylark-widgets-base/Widget",
+	"skylark-domx-plugins",
 	"skylark-nprogress",
 	"skylark-bootbox4",
     "skylark-visibility",
     "skylark-tinycon",
 	"./shells"
-],function(langx, css, scripter, finder,$,Widget,nprogress,bootbox,Visibility, Tinycon,shells){
+],function(langx, css, scripter, finder,$,plugins,nprogress,bootbox,Visibility, Tinycon,shells){
 	function createAlert(params,template) {
 	    params.parseTemplate('alert', params, function (alertTpl) {
 	      params.translate(alertTpl, function (translatedHTML) {				
@@ -123,7 +123,7 @@ define([
 
 
 
-	var Shell = Widget.inherit({
+	var Shell = plugins.Plugin.inherit({
 		options : {
 	        i18n : {
 	            locale : "en",
@@ -147,7 +147,7 @@ define([
 		},
 
 		_construct : function(options) {
-			this.overrided(document.body,options);
+			plugins.Plugin.prototype.call(this,document.body,options);
 
 	      	this._titleObj = {
 	        	active: false,

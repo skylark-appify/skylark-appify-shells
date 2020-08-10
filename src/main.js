@@ -1,7 +1,6 @@
 define([
 	"./shells",
-	"./Shell",
-	"skylark-bootstrap3"
+	"./Shell"
 ],function(shells){
 	return shells;
 })

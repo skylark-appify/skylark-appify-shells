@@ -1,2 +1,2 @@
-# skylark-ui-shells
+# skylark-ajaxify-shells
 The skylark ui shell library.

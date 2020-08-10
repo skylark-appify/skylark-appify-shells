@@ -1,5 +1,5 @@
 {
-  "name": "skylark-widgets-shells",
+  "name": "skylark-ajaxify-shells",
   "description": "The skylark shells widget",
   "version": "0.9.0",
   "keywords": [
@@ -7,29 +7,27 @@
     "ui",
     "shells"
   ],
-  "homepage": "https://github.com/skylark-widgets/skylark-widgets-shells/",
+  "homepage": "https://github.com/skylark-ajaxify/skylark-ajaxify-shells/",
   "author": "Hudaokeji, Inc.",
   "scripts": {
-    "build": "sbundle build ."
+    "build": "slib build ."
   },
   "repository": {
     "type": "git",
-    "url": "https://github.com/skylark-widgets/skylark-widgets-shells.git"
+    "url": "https://github.com/skylark-ajaxify/skylark-ajaxify-shells.git"
   },
   "bugs": {
-    "url": "https://github.com/skylark-widgets/skylark-widgets-shells/issues"
+    "url": "https://github.com/skylark-ajaxify/skylark-ajaxify-shells/issues"
   },
   "license": "MIT",
   "dependencies": {
     "skylark-bootbox4": "git+https://github.com/skylark-integration/skylark-bootbox4.git#master",
-    "skylark-bootstrap3": "git+https://github.com/skylark-integration/skylark-bootstrap3.git#master",
-    "skylark-domx-css": "git+https://github.com/skylark-domx/skylark-domx-css.git#master",
+    "skylark-domx": "git+https://github.com/skylark-domx/skylark-domx.git#master",
     "skylark-domx-scripter": "git+https://github.com/skylark-domx/skylark-domx-scripter.git#master",
     "skylark-langx": "git+https://github.com/skylark-langx/skylark-langx.git#master",
     "skylark-nprogress": "git+https://github.com/skylark-integration/skylark-nprogress.git#master",
     "skylark-tinycon": "git+https://github.com/skylark-integration/skylark-tinycon.git#master",
-    "skylark-visibility": "git+https://github.com/skylark-integration/skylark-visibility.git#master",
-    "skylark-widgets-base": "git+https://github.com/skylark-widgets/skylark-widgets-base.git#master"
+    "skylark-visibility": "git+https://github.com/skylark-integration/skylark-visibility.git#master"
   },
   "engines": {
     "node": ">=0.10.1"

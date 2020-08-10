@@ -1,16 +1,110 @@
-define([
+/**
+ * skylark-ajaxify-shells - The skylark shells widget
+ * @author Hudaokeji, Inc.
+ * @version v0.9.0
+ * @link https://github.com/skylark-ajaxify/skylark-ajaxify-shells/
+ * @license MIT
+ */
+(function(factory,globals) {
+  var define = globals.define,
+      require = globals.require,
+      isAmd = (typeof define === 'function' && define.amd),
+      isCmd = (!isAmd && typeof exports !== 'undefined');
+
+  if (!isAmd && !define) {
+    var map = {};
+    function absolute(relative, base) {
+        if (relative[0]!==".") {
+          return relative;
+        }
+        var stack = base.split("/"),
+            parts = relative.split("/");
+        stack.pop(); 
+        for (var i=0; i<parts.length; i++) {
+            if (parts[i] == ".")
+                continue;
+            if (parts[i] == "..")
+                stack.pop();
+            else
+                stack.push(parts[i]);
+        }
+        return stack.join("/");
+    }
+    define = globals.define = function(id, deps, factory) {
+        if (typeof factory == 'function') {
+            map[id] = {
+                factory: factory,
+                deps: deps.map(function(dep){
+                  return absolute(dep,id);
+                }),
+                resolved: false,
+                exports: null
+            };
+            require(id);
+        } else {
+            map[id] = {
+                factory : null,
+                resolved : true,
+                exports : factory
+            };
+        }
+    };
+    require = globals.require = function(id) {
+        if (!map.hasOwnProperty(id)) {
+            throw new Error('Module ' + id + ' has not been defined');
+        }
+        var module = map[id];
+        if (!module.resolved) {
+            var args = [];
+
+            module.deps.forEach(function(dep){
+                args.push(require(dep));
+            })
+
+            module.exports = module.factory.apply(globals, args) || null;
+            module.resolved = true;
+        }
+        return module.exports;
+    };
+  }
+  
+  if (!define) {
+     throw new Error("The module utility (ex: requirejs or skylark-utils) is not loaded!");
+  }
+
+  factory(define,require);
+
+  if (!isAmd) {
+    var skylarkjs = require("skylark-langx-ns");
+
+    if (isCmd) {
+      module.exports = skylarkjs;
+    } else {
+      globals.skylarkjs  = skylarkjs;
+    }
+  }
+
+})(function(define,require) {
+
+define('skylark-ajaxify-shells/shells',[
+	"skylark-langx/skylark"
+],function(skylark){
+	return skylark.attach("ajaxify.shells",{});
+
+});
+define('skylark-ajaxify-shells/Shell',[
 	"skylark-langx/langx",
 	"skylark-domx-css",
 	"skylark-domx-scripter",
 	"skylark-domx-finder",
 	"skylark-domx-query",
-	"skylark-widgets-base/Widget",
+	"skylark-domx-plugins",
 	"skylark-nprogress",
 	"skylark-bootbox4",
     "skylark-visibility",
     "skylark-tinycon",
 	"./shells"
-],function(langx, css, scripter, finder,$,Widget,nprogress,bootbox,Visibility, Tinycon,shells){
+],function(langx, css, scripter, finder,$,plugins,nprogress,bootbox,Visibility, Tinycon,shells){
 	function createAlert(params,template) {
 	    params.parseTemplate('alert', params, function (alertTpl) {
 	      params.translate(alertTpl, function (translatedHTML) {				
@@ -123,7 +217,7 @@ define([
 
 
 
-	var Shell = Widget.inherit({
+	var Shell = plugins.Plugin.inherit({
 		options : {
 	        i18n : {
 	            locale : "en",
@@ -147,7 +241,7 @@ define([
 		},
 
 		_construct : function(options) {
-			this.overrided(document.body,options);
+			plugins.Plugin.prototype.call(this,document.body,options);
 
 	      	this._titleObj = {
 	        	active: false,
@@ -348,3 +442,15 @@ define([
 	return shells.Shell = Shell;
 
 });
+
+define('skylark-ajaxify-shells/main',[
+	"./shells",
+	"./Shell"
+],function(shells){
+	return shells;
+});
+define('skylark-ajaxify-shells', ['skylark-ajaxify-shells/main'], function (main) { return main; });
+
+
+},this);
+//# sourceMappingURL=sourcemaps/skylark-ajaxify-shells.js.map
