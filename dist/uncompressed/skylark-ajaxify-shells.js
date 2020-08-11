@@ -241,7 +241,7 @@ define('skylark-ajaxify-shells/Shell',[
 		},
 
 		_construct : function(options) {
-			plugins.Plugin.prototype.call(this,document.body,options);
+			plugins.Plugin.prototype._construct.call(this,document.body,options);
 
 	      	this._titleObj = {
 	        	active: false,
