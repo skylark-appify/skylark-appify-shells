@@ -4,7 +4,7 @@ define([
 	"skylark-domx-scripter",
 	"skylark-domx-finder",
 	"skylark-domx-query",
-	"skylark-domx-plugins",
+	"skylark-domx-plugins-base",
 	"skylark-nprogress",
 	"skylark-bootbox4",
     "skylark-visibility",
