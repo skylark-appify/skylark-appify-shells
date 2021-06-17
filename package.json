@@ -1,5 +1,5 @@
 {
-  "name": "skylark-ajaxify-shells",
+  "name": "skylark-appify-shells",
   "description": "The skylark shells widget",
   "version": "0.9.0",
   "keywords": [
@@ -7,17 +7,17 @@
     "ui",
     "shells"
   ],
-  "homepage": "https://github.com/skylark-ajaxify/skylark-ajaxify-shells/",
+  "homepage": "https://github.com/skylark-appify/skylark-appify-shells/",
   "author": "Hudaokeji, Inc.",
   "scripts": {
     "build": "slib build ."
   },
   "repository": {
     "type": "git",
-    "url": "https://github.com/skylark-ajaxify/skylark-ajaxify-shells.git"
+    "url": "https://github.com/skylark-appify/skylark-appify-shells.git"
   },
   "bugs": {
-    "url": "https://github.com/skylark-ajaxify/skylark-ajaxify-shells/issues"
+    "url": "https://github.com/skylark-appify/skylark-appify-shells/issues"
   },
   "license": "MIT",
   "dependencies": {
