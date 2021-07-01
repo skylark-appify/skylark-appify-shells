@@ -5,5 +5,5 @@
  * @link https://github.com/skylark-appify/skylark-appify-shells/
  * @license MIT
  */
-define(["./shells","./Shell"],function(e){return e});
+define(["./shells","./shell"],function(e){return e});
 //# sourceMappingURL=sourcemaps/main.js.map

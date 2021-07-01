@@ -5,5 +5,5 @@
  * @link https://github.com/skylark-appify/skylark-appify-shells/
  * @license MIT
  */
-define(["skylark-langx/skylark"],function(a){return a.attach("ajaxify.shells",{})});
+define(["skylark-langx/skylark"],function(a){return a.attach("appify.shells")});
 //# sourceMappingURL=sourcemaps/shells.js.map

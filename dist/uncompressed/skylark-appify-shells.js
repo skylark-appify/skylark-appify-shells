@@ -89,10 +89,10 @@
 define('skylark-appify-shells/shells',[
 	"skylark-langx/skylark"
 ],function(skylark){
-	return skylark.attach("ajaxify.shells",{});
+	return skylark.attach("appify.shells");
 
 });
-define('skylark-appify-shells/Shell',[
+define('skylark-appify-shells/shell',[
 	"skylark-langx/langx",
 	"skylark-domx-css",
 	"skylark-domx-scripter",
@@ -445,7 +445,7 @@ define('skylark-appify-shells/Shell',[
 
 define('skylark-appify-shells/main',[
 	"./shells",
-	"./Shell"
+	"./shell"
 ],function(shells){
 	return shells;
 });

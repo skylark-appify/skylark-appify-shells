@@ -1,6 +1,6 @@
 define([
 	"./shells",
-	"./Shell"
+	"./shell"
 ],function(shells){
 	return shells;
 })

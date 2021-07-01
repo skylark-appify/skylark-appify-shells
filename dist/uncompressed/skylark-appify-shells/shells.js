@@ -1,6 +1,6 @@
 define([
 	"skylark-langx/skylark"
 ],function(skylark){
-	return skylark.attach("ajaxify.shells",{});
+	return skylark.attach("appify.shells");
 
 });
