@@ -21,14 +21,14 @@
   },
   "license": "MIT",
   "dependencies": {
-    "skylark-bootbox4": "git+https://github.com/skylark-integration/skylark-bootbox4.git#master",
-    "skylark-domx": "git+https://github.com/skylark-domx/skylark-domx.git#master",
-    "skylark-domx-plugins-base": "git+https://github.com/skylark-domx-plugins/skylark-domx-plugins-base.git#master",
-    "skylark-domx-scripter": "git+https://github.com/skylark-domx/skylark-domx-scripter.git#master",
-    "skylark-langx": "git+https://github.com/skylark-langx/skylark-langx.git#master",
-    "skylark-nprogress": "git+https://github.com/skylark-integration/skylark-nprogress.git#master",
-    "skylark-tinycon": "git+https://github.com/skylark-integration/skylark-tinycon.git#master",
-    "skylark-visibility": "git+https://github.com/skylark-integration/skylark-visibility.git#master"
+    "skylark-bootbox4": "git+https://github.com/skylark-integration/skylark-bootbox4.git",
+    "skylark-domx": "git+https://github.com/skylark-domx/skylark-domx.git",
+    "skylark-domx-plugins-base": "git+https://github.com/skylark-domx-plugins/skylark-domx-plugins-base.git",
+    "skylark-domx-scripter": "git+https://github.com/skylark-domx/skylark-domx-scripter.git",
+    "skylark-langx": "git+https://github.com/skylark-langx/skylark-langx.git",
+    "skylark-nprogress": "git+https://github.com/skylark-integration/skylark-nprogress.git",
+    "skylark-tinycon": "git+https://github.com/skylark-integration/skylark-tinycon.git",
+    "skylark-visibility": "git+https://github.com/skylark-integration/skylark-visibility.git"
   },
   "engines": {
     "node": ">=0.10.1"
