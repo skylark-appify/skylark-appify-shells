@@ -24,7 +24,6 @@
     "skylark-bootbox4": "git+https://github.com/skylark-integration/skylark-bootbox4.git",
     "skylark-domx": "git+https://github.com/skylark-domx/skylark-domx.git",
     "skylark-domx-plugins-base": "git+https://github.com/skylark-domx-plugins/skylark-domx-plugins-base.git",
-    "skylark-domx-scripter": "git+https://github.com/skylark-domx/skylark-domx-scripter.git",
     "skylark-langx": "git+https://github.com/skylark-langx/skylark-langx.git",
     "skylark-nprogress": "git+https://github.com/skylark-integration/skylark-nprogress.git",
     "skylark-tinycon": "git+https://github.com/skylark-integration/skylark-tinycon.git",
