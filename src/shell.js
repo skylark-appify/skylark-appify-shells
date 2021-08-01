@@ -1,7 +1,7 @@
 define([
 	"skylark-langx/langx",
 	"skylark-domx-css",
-	"skylark-domx-scripter",
+	"skylark-langx-scripter",
 	"skylark-domx-finder",
 	"skylark-domx-query",
 	"skylark-domx-plugins-base",
